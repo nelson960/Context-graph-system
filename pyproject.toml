@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "context-graph"
+version = "0.1.0"
+description = "Notebook-first context graph pipeline for the SAP order-to-cash dataset"
+requires-python = ">=3.12"
+dependencies = [
+  "pandas>=2.2",
+  "sqlalchemy>=2.0",
+  "networkx>=3.4",
+  "plotly>=5.24",
+  "nbformat>=5.10",
+  "fastapi>=0.115",
+  "uvicorn>=0.34",
+  "pydantic>=2.10",
+  "sqlglot>=25.30",
+  "openai>=2.14",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
