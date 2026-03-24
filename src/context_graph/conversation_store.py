@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from context_graph.schemas import ConversationMemoryState, QueryPlanEntity
+from context_graph.sqlite_utils import connect_writable_sqlite
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,7 @@ class ConversationStore:
     def ensure_conversation(self, conversation_id: str | None) -> str:
         resolved_id = conversation_id or str(uuid4())
         timestamp = self._utcnow()
-        with sqlite3.connect(self._db_path) as connection:
+        with connect_writable_sqlite(self._db_path) as connection:
             connection.execute(
                 """
                 INSERT INTO conversations (conversation_id, created_at, updated_at)
@@ -46,7 +47,7 @@ class ConversationStore:
     def load_context(self, conversation_id: str | None) -> ConversationContext | None:
         if not conversation_id:
             return None
-        with sqlite3.connect(self._db_path) as connection:
+        with connect_writable_sqlite(self._db_path) as connection:
             connection.row_factory = sqlite3.Row
             exists = connection.execute(
                 "SELECT 1 FROM conversations WHERE conversation_id = ?",
@@ -114,7 +115,7 @@ class ConversationStore:
         response_payload: dict,
     ) -> None:
         timestamp = self._utcnow()
-        with sqlite3.connect(self._db_path) as connection:
+        with connect_writable_sqlite(self._db_path) as connection:
             connection.execute(
                 "UPDATE conversations SET updated_at = ? WHERE conversation_id = ?",
                 (timestamp, conversation_id),
@@ -196,7 +197,7 @@ class ConversationStore:
             connection.commit()
 
     def _ensure_schema(self) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+        with connect_writable_sqlite(self._db_path) as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS conversations (

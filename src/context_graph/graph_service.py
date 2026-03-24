@@ -7,10 +7,10 @@ from typing import Any
 
 import networkx as nx
 import pandas as pd
-from sqlalchemy import create_engine
 
 from context_graph.graph import HIDDEN_BY_DEFAULT, build_networkx_graph
 from context_graph.schemas import EdgeDTO, GraphResponse, NodeDTO
+from context_graph.sqlite_utils import connect_readonly_sqlite
 
 
 FLOW_EDGE_TYPES = {
@@ -31,9 +31,9 @@ class GraphService:
         self._db_path = db_path
         self._max_nodes = max_nodes
         self._max_edges = max_edges
-        engine = create_engine(f"sqlite:///{db_path}")
-        self._nodes_df = pd.read_sql_table("graph_nodes", engine)
-        self._edges_df = pd.read_sql_table("graph_edges", engine)
+        with connect_readonly_sqlite(db_path) as connection:
+            self._nodes_df = pd.read_sql_query("SELECT * FROM graph_nodes", connection)
+            self._edges_df = pd.read_sql_query("SELECT * FROM graph_edges", connection)
         self._graph = build_networkx_graph(self._nodes_df, self._edges_df)
         self._node_id_index = set(self._nodes_df["node_id"].tolist())
         self._edge_id_index = set(self._edges_df["edge_id"].tolist())

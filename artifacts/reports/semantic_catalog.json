@@ -1,0 +1,504 @@
+{
+  "allowed_metrics": [
+    "count",
+    "count_distinct",
+    "sum",
+    "avg",
+    "min",
+    "max",
+    "ratio"
+  ],
+  "approved_views": {
+    "v_billing_flow": "Billing header and item flow with upstream delivery and sales order context.",
+    "v_billing_trace": "Billing-item-level lineage from sales order through payment settlement.",
+    "v_customer_360": "Customer-centric rollup of order, delivery, billing, and payment activity.",
+    "v_delivery_flow": "Delivery header and item flow with upstream sales order and downstream billing context.",
+    "v_financial_flow": "Billing to AR journal entry to payment settlement flow.",
+    "v_incomplete_order_flows": "Order and order-item anomalies, including delivered-not-billed and missing finance steps.",
+    "v_product_billing_summary": "Product-level billing aggregates and distinct billing document counts.",
+    "v_sales_order_flow": "Sales order header and item flow with customer, product, delivery, and billing context."
+  },
+  "entities": {
+    "addresses": {
+      "bool_columns": [
+        "poBoxIsWithoutNumber"
+      ],
+      "datetime_columns": [
+        "validityEndDate",
+        "validityStartDate"
+      ],
+      "id_columns": [
+        "addressId",
+        "addressUuid",
+        "businessPartner",
+        "country",
+        "postalCode",
+        "region"
+      ],
+      "numeric_columns": [],
+      "primary_key": [
+        "businessPartner",
+        "addressId"
+      ],
+      "raw_name": "business_partner_addresses",
+      "time_columns": []
+    },
+    "billing_document_cancellations": {
+      "bool_columns": [
+        "billingDocumentIsCancelled"
+      ],
+      "datetime_columns": [
+        "billingDocumentDate",
+        "creationDate",
+        "lastChangeDateTime"
+      ],
+      "id_columns": [
+        "accountingDocument",
+        "billingDocument",
+        "cancelledBillingDocument",
+        "companyCode",
+        "fiscalYear",
+        "soldToParty"
+      ],
+      "numeric_columns": [
+        "totalNetAmount"
+      ],
+      "primary_key": [
+        "billingDocument"
+      ],
+      "raw_name": "billing_document_cancellations",
+      "time_columns": [
+        "creationTime"
+      ]
+    },
+    "billing_documents": {
+      "bool_columns": [
+        "billingDocumentIsCancelled"
+      ],
+      "datetime_columns": [
+        "billingDocumentDate",
+        "creationDate",
+        "lastChangeDateTime"
+      ],
+      "id_columns": [
+        "accountingDocument",
+        "billingDocument",
+        "cancelledBillingDocument",
+        "companyCode",
+        "fiscalYear",
+        "soldToParty"
+      ],
+      "numeric_columns": [
+        "totalNetAmount"
+      ],
+      "primary_key": [
+        "billingDocument"
+      ],
+      "raw_name": "billing_document_headers",
+      "time_columns": [
+        "creationTime"
+      ]
+    },
+    "billing_items": {
+      "bool_columns": [],
+      "datetime_columns": [],
+      "id_columns": [
+        "billingDocument",
+        "billingDocumentItem",
+        "material",
+        "referenceSdDocument",
+        "referenceSdDocumentItem"
+      ],
+      "numeric_columns": [
+        "billingQuantity",
+        "netAmount"
+      ],
+      "primary_key": [
+        "billingDocument",
+        "billingDocumentItem"
+      ],
+      "raw_name": "billing_document_items",
+      "time_columns": []
+    },
+    "customer_company_assignments": {
+      "bool_columns": [
+        "deletionIndicator"
+      ],
+      "datetime_columns": [],
+      "id_columns": [
+        "accountingClerk",
+        "alternativePayerAccount",
+        "companyCode",
+        "customer",
+        "customerAccountGroup",
+        "reconciliationAccount"
+      ],
+      "numeric_columns": [],
+      "primary_key": [
+        "customer",
+        "companyCode"
+      ],
+      "raw_name": "customer_company_assignments",
+      "time_columns": []
+    },
+    "customer_sales_area_assignments": {
+      "bool_columns": [
+        "billingIsBlockedForCustomer",
+        "completeDeliveryIsDefined",
+        "slsUnlmtdOvrdelivIsAllwd"
+      ],
+      "datetime_columns": [],
+      "id_columns": [
+        "creditControlArea",
+        "currency",
+        "customer",
+        "deliveryPriority",
+        "distributionChannel",
+        "division",
+        "exchangeRateType",
+        "incotermsClassification",
+        "incotermsLocation1",
+        "salesDistrict",
+        "salesGroup",
+        "salesOffice",
+        "salesOrganization",
+        "shippingCondition",
+        "supplyingPlant"
+      ],
+      "numeric_columns": [],
+      "primary_key": [
+        "customer",
+        "salesOrganization",
+        "distributionChannel",
+        "division"
+      ],
+      "raw_name": "customer_sales_area_assignments",
+      "time_columns": []
+    },
+    "customers": {
+      "bool_columns": [
+        "businessPartnerIsBlocked",
+        "isMarkedForArchiving"
+      ],
+      "datetime_columns": [
+        "creationDate",
+        "lastChangeDate"
+      ],
+      "id_columns": [
+        "businessPartner",
+        "businessPartnerGrouping",
+        "createdByUser",
+        "customer"
+      ],
+      "numeric_columns": [],
+      "primary_key": [
+        "businessPartner"
+      ],
+      "raw_name": "business_partners",
+      "time_columns": [
+        "creationTime"
+      ]
+    },
+    "deliveries": {
+      "bool_columns": [],
+      "datetime_columns": [
+        "actualGoodsMovementDate",
+        "creationDate",
+        "lastChangeDate"
+      ],
+      "id_columns": [
+        "deliveryDocument",
+        "shippingPoint"
+      ],
+      "numeric_columns": [],
+      "primary_key": [
+        "deliveryDocument"
+      ],
+      "raw_name": "outbound_delivery_headers",
+      "time_columns": [
+        "actualGoodsMovementTime",
+        "creationTime"
+      ]
+    },
+    "delivery_items": {
+      "bool_columns": [],
+      "datetime_columns": [
+        "lastChangeDate"
+      ],
+      "id_columns": [
+        "batch",
+        "deliveryDocument",
+        "deliveryDocumentItem",
+        "plant",
+        "referenceSdDocument",
+        "referenceSdDocumentItem",
+        "storageLocation"
+      ],
+      "numeric_columns": [
+        "actualDeliveryQuantity"
+      ],
+      "primary_key": [
+        "deliveryDocument",
+        "deliveryDocumentItem"
+      ],
+      "raw_name": "outbound_delivery_items",
+      "time_columns": []
+    },
+    "journal_entries_ar": {
+      "bool_columns": [],
+      "datetime_columns": [
+        "clearingDate",
+        "documentDate",
+        "lastChangeDateTime",
+        "postingDate"
+      ],
+      "id_columns": [
+        "accountingDocument",
+        "accountingDocumentItem",
+        "assignmentReference",
+        "clearingAccountingDocument",
+        "clearingDocFiscalYear",
+        "companyCode",
+        "costCenter",
+        "customer",
+        "financialAccountType",
+        "fiscalYear",
+        "glAccount",
+        "profitCenter",
+        "referenceDocument"
+      ],
+      "numeric_columns": [
+        "amountInCompanyCodeCurrency",
+        "amountInTransactionCurrency"
+      ],
+      "primary_key": [
+        "companyCode",
+        "fiscalYear",
+        "accountingDocument",
+        "accountingDocumentItem"
+      ],
+      "raw_name": "journal_entry_items_accounts_receivable",
+      "time_columns": []
+    },
+    "payments_ar": {
+      "bool_columns": [],
+      "datetime_columns": [
+        "clearingDate",
+        "documentDate",
+        "postingDate"
+      ],
+      "id_columns": [
+        "accountingDocument",
+        "accountingDocumentItem",
+        "assignmentReference",
+        "clearingAccountingDocument",
+        "clearingDocFiscalYear",
+        "companyCode",
+        "costCenter",
+        "customer",
+        "financialAccountType",
+        "fiscalYear",
+        "glAccount",
+        "invoiceReference",
+        "invoiceReferenceFiscalYear",
+        "profitCenter",
+        "salesDocument",
+        "salesDocumentItem"
+      ],
+      "numeric_columns": [
+        "amountInCompanyCodeCurrency",
+        "amountInTransactionCurrency"
+      ],
+      "primary_key": [
+        "companyCode",
+        "fiscalYear",
+        "accountingDocument",
+        "accountingDocumentItem"
+      ],
+      "raw_name": "payments_accounts_receivable",
+      "time_columns": []
+    },
+    "plants": {
+      "bool_columns": [
+        "isMarkedForArchiving"
+      ],
+      "datetime_columns": [],
+      "id_columns": [
+        "addressId",
+        "defaultPurchasingOrganization",
+        "distributionChannel",
+        "division",
+        "factoryCalendar",
+        "language",
+        "plant",
+        "plantCustomer",
+        "plantSupplier",
+        "salesOrganization"
+      ],
+      "numeric_columns": [],
+      "primary_key": [
+        "plant"
+      ],
+      "raw_name": "plants",
+      "time_columns": []
+    },
+    "product_descriptions": {
+      "bool_columns": [],
+      "datetime_columns": [],
+      "id_columns": [
+        "language",
+        "product"
+      ],
+      "numeric_columns": [],
+      "primary_key": [
+        "product",
+        "language"
+      ],
+      "raw_name": "product_descriptions",
+      "time_columns": []
+    },
+    "product_plant_assignments": {
+      "bool_columns": [],
+      "datetime_columns": [],
+      "id_columns": [
+        "plant",
+        "product"
+      ],
+      "numeric_columns": [],
+      "primary_key": [
+        "product",
+        "plant"
+      ],
+      "raw_name": "product_plants",
+      "time_columns": []
+    },
+    "products": {
+      "bool_columns": [
+        "isMarkedForDeletion"
+      ],
+      "datetime_columns": [
+        "creationDate",
+        "crossPlantStatusValidityDate",
+        "lastChangeDate",
+        "lastChangeDateTime"
+      ],
+      "id_columns": [
+        "createdByUser",
+        "division",
+        "industrySector",
+        "product",
+        "productGroup",
+        "productOldId",
+        "productType"
+      ],
+      "numeric_columns": [
+        "grossWeight",
+        "netWeight"
+      ],
+      "primary_key": [
+        "product"
+      ],
+      "raw_name": "products",
+      "time_columns": []
+    },
+    "sales_order_items": {
+      "bool_columns": [],
+      "datetime_columns": [],
+      "id_columns": [
+        "material",
+        "materialGroup",
+        "productionPlant",
+        "salesOrder",
+        "salesOrderItem",
+        "storageLocation"
+      ],
+      "numeric_columns": [
+        "netAmount",
+        "requestedQuantity"
+      ],
+      "primary_key": [
+        "salesOrder",
+        "salesOrderItem"
+      ],
+      "raw_name": "sales_order_items",
+      "time_columns": []
+    },
+    "sales_orders": {
+      "bool_columns": [],
+      "datetime_columns": [
+        "creationDate",
+        "lastChangeDateTime",
+        "pricingDate",
+        "requestedDeliveryDate"
+      ],
+      "id_columns": [
+        "distributionChannel",
+        "organizationDivision",
+        "salesOrder",
+        "salesOrganization",
+        "soldToParty"
+      ],
+      "numeric_columns": [
+        "totalNetAmount"
+      ],
+      "primary_key": [
+        "salesOrder"
+      ],
+      "raw_name": "sales_order_headers",
+      "time_columns": []
+    },
+    "schedule_lines": {
+      "bool_columns": [],
+      "datetime_columns": [
+        "confirmedDeliveryDate"
+      ],
+      "id_columns": [
+        "salesOrder",
+        "salesOrderItem",
+        "scheduleLine"
+      ],
+      "numeric_columns": [
+        "confdOrderQtyByMatlAvailCheck"
+      ],
+      "primary_key": [
+        "salesOrder",
+        "salesOrderItem",
+        "scheduleLine"
+      ],
+      "raw_name": "sales_order_schedule_lines",
+      "time_columns": []
+    },
+    "storage_locations": {
+      "bool_columns": [],
+      "datetime_columns": [],
+      "id_columns": [
+        "plant",
+        "product",
+        "storageLocation"
+      ],
+      "numeric_columns": [],
+      "primary_key": [
+        "product",
+        "plant",
+        "storageLocation"
+      ],
+      "raw_name": "product_storage_locations",
+      "time_columns": []
+    }
+  },
+  "glossary": {
+    "ar": "accounts receivable",
+    "billing": "billing document",
+    "billing doc": "billing document",
+    "broken flow": "missing upstream or downstream process relationship",
+    "customer": "business partner / sold-to party",
+    "delivery": "outbound delivery",
+    "invoice": "billing document",
+    "invoicing": "billing document",
+    "journal entry": "accounts receivable journal entry",
+    "material": "product",
+    "payment clearing": "payment settlement against AR journal entries",
+    "product": "material",
+    "sales order": "sales order"
+  }
+}

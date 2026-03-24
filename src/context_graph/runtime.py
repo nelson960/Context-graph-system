@@ -34,6 +34,7 @@ class AppRuntime:
         self.entity_service = EntityService(
             db_path=self.settings.db_path,
             glossary=self.catalog_service.glossary,
+            read_only=True,
         )
         self.graph_service = GraphService(
             db_path=self.settings.db_path,
@@ -50,7 +51,7 @@ class AppRuntime:
             timeout_ms=self.settings.query_timeout_ms,
         )
         query_logger = QueryLogger(self.settings.query_log_path)
-        conversation_store = ConversationStore(self.settings.db_path)
+        conversation_store = ConversationStore(self.settings.state_db_path)
         evidence_service = EvidenceService(self.graph_service)
         plan_validator = QueryPlanValidator()
         self.query_service = QueryService(

@@ -1,4 +1,5 @@
 import {
+  Fragment,
   startTransition,
   useDeferredValue,
   useEffect,
@@ -7,6 +8,7 @@ import {
   useState,
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import cytoscape, { type Core, type ElementDefinition, type StylesheetJson } from "cytoscape";
 
@@ -138,6 +140,10 @@ type PopoverPosition = {
   y: number;
 };
 
+type MarkdownBlock =
+  | { type: "text"; content: string }
+  | { type: "code"; language: string | null; content: string };
+
 export function App() {
   const [searchText, setSearchText] = useState("");
   const deferredSearchText = useDeferredValue(searchText);
@@ -164,6 +170,18 @@ export function App() {
     offsetY: number;
   } | null>(null);
   const cyRef = useRef<Core | null>(null);
+
+  function scrollChatLogToBottom() {
+    if (!chatLogRef.current) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      if (!chatLogRef.current) {
+        return;
+      }
+      chatLogRef.current.scrollTop = chatLogRef.current.scrollHeight;
+    });
+  }
 
   function clampPopoverPosition(position: PopoverPosition): PopoverPosition {
     const frame = graphFrameRef.current;
@@ -333,10 +351,7 @@ export function App() {
   }, [selectedNodeDetail?.node.id]);
 
   useEffect(() => {
-    if (!chatLogRef.current) {
-      return;
-    }
-    chatLogRef.current.scrollTop = chatLogRef.current.scrollHeight;
+    scrollChatLogToBottom();
   }, [messages]);
 
   useEffect(() => () => {
@@ -695,7 +710,7 @@ export function App() {
               ) : (
                 messages.map((message) => (
                   <article key={message.id} className={`message ${message.role}`}>
-                    <div className="message-content">{message.content}</div>
+                    <div className="message-content">{renderMarkdown(message.content)}</div>
                     {message.meta?.sql ? (
                       <details className="message-meta">
                         <summary>SQL and provenance</summary>
@@ -771,4 +786,227 @@ function graphElements(
     classes: highlightedEdges.has(edge.id) ? "highlighted" : "",
   }));
   return [...nodes, ...edges];
+}
+
+function renderMarkdown(content: string): ReactNode {
+  const blocks = parseMarkdownBlocks(content);
+  return blocks.map((block, blockIndex) => {
+    if (block.type === "code") {
+      return (
+        <pre key={`code-${blockIndex}`} className="markdown-code-block">
+          {block.language ? <span className="markdown-code-language">{block.language}</span> : null}
+          <code>{block.content}</code>
+        </pre>
+      );
+    }
+    return renderMarkdownTextBlock(block.content, `text-${blockIndex}`);
+  });
+}
+
+function parseMarkdownBlocks(content: string): MarkdownBlock[] {
+  const blocks: MarkdownBlock[] = [];
+  const normalized = content.replace(/\r\n/g, "\n");
+  const codeFencePattern = /```([a-zA-Z0-9_-]+)?\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match = codeFencePattern.exec(normalized);
+
+  while (match) {
+    if (match.index > lastIndex) {
+      blocks.push({
+        type: "text",
+        content: normalized.slice(lastIndex, match.index),
+      });
+    }
+    blocks.push({
+      type: "code",
+      language: match[1] ?? null,
+      content: match[2].replace(/\n$/, ""),
+    });
+    lastIndex = match.index + match[0].length;
+    match = codeFencePattern.exec(normalized);
+  }
+
+  if (lastIndex < normalized.length) {
+    blocks.push({
+      type: "text",
+      content: normalized.slice(lastIndex),
+    });
+  }
+
+  return blocks.length > 0 ? blocks : [{ type: "text", content: normalized }];
+}
+
+function renderMarkdownTextBlock(content: string, keyPrefix: string): ReactNode {
+  const lines = content.split("\n");
+  const blocks: ReactNode[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) {
+      index += 1;
+      continue;
+    }
+
+    const headingMatch = /^(#{1,3})\s+(.*)$/.exec(line);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const children = renderInlineMarkdown(headingMatch[2], `${keyPrefix}-heading-${index}`);
+      if (level === 1) {
+        blocks.push(<h1 key={`${keyPrefix}-h1-${index}`}>{children}</h1>);
+      } else if (level === 2) {
+        blocks.push(<h2 key={`${keyPrefix}-h2-${index}`}>{children}</h2>);
+      } else {
+        blocks.push(<h3 key={`${keyPrefix}-h3-${index}`}>{children}</h3>);
+      }
+      index += 1;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      const items: ReactNode[] = [];
+      let itemIndex = index;
+      while (itemIndex < lines.length) {
+        const itemLine = lines[itemIndex].trim();
+        const itemMatch = /^[-*]\s+(.*)$/.exec(itemLine);
+        if (!itemMatch) {
+          break;
+        }
+        items.push(
+          <li key={`${keyPrefix}-ul-${itemIndex}`}>
+            {renderInlineMarkdown(itemMatch[1], `${keyPrefix}-ul-item-${itemIndex}`)}
+          </li>,
+        );
+        itemIndex += 1;
+      }
+      blocks.push(
+        <ul key={`${keyPrefix}-ul-group-${index}`} className="markdown-list">
+          {items}
+        </ul>,
+      );
+      index = itemIndex;
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(line)) {
+      const items: ReactNode[] = [];
+      let itemIndex = index;
+      while (itemIndex < lines.length) {
+        const itemLine = lines[itemIndex].trim();
+        const itemMatch = /^\d+\.\s+(.*)$/.exec(itemLine);
+        if (!itemMatch) {
+          break;
+        }
+        items.push(
+          <li key={`${keyPrefix}-ol-${itemIndex}`}>
+            {renderInlineMarkdown(itemMatch[1], `${keyPrefix}-ol-item-${itemIndex}`)}
+          </li>,
+        );
+        itemIndex += 1;
+      }
+      blocks.push(
+        <ol key={`${keyPrefix}-ol-group-${index}`} className="markdown-list">
+          {items}
+        </ol>,
+      );
+      index = itemIndex;
+      continue;
+    }
+
+    if (/^>\s+/.test(line)) {
+      const quoteLines: string[] = [];
+      let quoteIndex = index;
+      while (quoteIndex < lines.length) {
+        const quoteLine = lines[quoteIndex].trim();
+        const quoteMatch = /^>\s+(.*)$/.exec(quoteLine);
+        if (!quoteMatch) {
+          break;
+        }
+        quoteLines.push(quoteMatch[1]);
+        quoteIndex += 1;
+      }
+      blocks.push(
+        <blockquote key={`${keyPrefix}-blockquote-${index}`}>
+          {renderInlineMarkdown(quoteLines.join(" "), `${keyPrefix}-blockquote-inline-${index}`)}
+        </blockquote>,
+      );
+      index = quoteIndex;
+      continue;
+    }
+
+    const paragraphLines: string[] = [line];
+    let paragraphIndex = index + 1;
+    while (paragraphIndex < lines.length) {
+      const paragraphLine = lines[paragraphIndex].trim();
+      if (
+        !paragraphLine ||
+        /^(#{1,3})\s+/.test(paragraphLine) ||
+        /^[-*]\s+/.test(paragraphLine) ||
+        /^\d+\.\s+/.test(paragraphLine) ||
+        /^>\s+/.test(paragraphLine)
+      ) {
+        break;
+      }
+      paragraphLines.push(paragraphLine);
+      paragraphIndex += 1;
+    }
+    blocks.push(
+      <p key={`${keyPrefix}-p-${index}`}>
+        {renderInlineMarkdown(paragraphLines.join(" "), `${keyPrefix}-p-inline-${index}`)}
+      </p>,
+    );
+    index = paragraphIndex;
+  }
+
+  return <Fragment key={keyPrefix}>{blocks}</Fragment>;
+}
+
+function renderInlineMarkdown(content: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+  let lastIndex = 0;
+  let match = pattern.exec(content);
+
+  while (match) {
+    if (match.index > lastIndex) {
+      nodes.push(content.slice(lastIndex, match.index));
+    }
+    const token = match[0];
+    if (token.startsWith("**") && token.endsWith("**")) {
+      nodes.push(
+        <strong key={`${keyPrefix}-${match.index}`}>
+          {token.slice(2, -2)}
+        </strong>,
+      );
+    } else if (token.startsWith("`") && token.endsWith("`")) {
+      nodes.push(
+        <code key={`${keyPrefix}-${match.index}`} className="markdown-inline-code">
+          {token.slice(1, -1)}
+        </code>,
+      );
+    } else {
+      const linkMatch = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
+      if (linkMatch) {
+        nodes.push(
+          <a
+            key={`${keyPrefix}-${match.index}`}
+            href={linkMatch[2]}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {linkMatch[1]}
+          </a>,
+        );
+      } else {
+        nodes.push(token);
+      }
+    }
+    lastIndex = match.index + token.length;
+    match = pattern.exec(content);
+  }
+
+  if (lastIndex < content.length) {
+    nodes.push(content.slice(lastIndex));
+  }
+  return nodes;
 }

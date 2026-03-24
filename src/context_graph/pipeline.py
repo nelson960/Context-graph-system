@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 
 from context_graph.bridges import build_all_bridges, build_bridge_coverage_report
 from context_graph.config import APPROVED_VIEWS, ENTITY_CONFIGS
+from context_graph.entity_service import ensure_entity_search_index
 from context_graph.graph import build_graph_tables
 from context_graph.io import profile_staging_frames, load_all_staging_frames
 from context_graph.normalize import normalize_all_frames
@@ -114,6 +115,7 @@ def _write_frames_to_sqlite(
     _sql_safe_frame(edges_df).to_sql("graph_edges", engine, if_exists="replace", index=False)
     create_sql_indexes(engine)
     create_sql_views(engine)
+    ensure_entity_search_index(db_path, read_only=False)
     return engine
 
 

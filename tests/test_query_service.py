@@ -96,6 +96,7 @@ class FailingPlannerStub(GraphPlannerStub):
 
 def build_query_service(tmp_path: Path, planner=None) -> QueryService:
     test_db_path = tmp_path / "context_graph.test.db"
+    state_db_path = tmp_path / "context_graph.runtime.db"
     shutil.copyfile(DB_PATH, test_db_path)
     catalog_service = CatalogService(
         db_path=test_db_path,
@@ -117,7 +118,7 @@ def build_query_service(tmp_path: Path, planner=None) -> QueryService:
         sql_validator=SqlValidator(catalog_service=catalog_service, max_rows=200),
         sql_executor=SqlExecutor(db_path=test_db_path, timeout_ms=5000),
         query_logger=QueryLogger(tmp_path / "query_events.jsonl"),
-        conversation_store=ConversationStore(test_db_path),
+        conversation_store=ConversationStore(state_db_path),
         plan_validator=QueryPlanValidator(),
         evidence_service=EvidenceService(graph_service),
     )

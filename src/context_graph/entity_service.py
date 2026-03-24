@@ -5,6 +5,7 @@ from pathlib import Path
 
 from context_graph.exceptions import AmbiguousEntityError, EntityResolutionError
 from context_graph.schemas import EntitySearchResult
+from context_graph.sqlite_utils import connect_readonly_sqlite, connect_writable_sqlite
 
 
 ENTITY_TYPE_TO_PREFIX = {
@@ -28,13 +29,19 @@ ENTITY_TYPE_TO_PREFIX = {
 
 
 class EntityService:
-    def __init__(self, db_path: Path, glossary: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        glossary: dict[str, str] | None = None,
+        read_only: bool = True,
+    ) -> None:
         self._db_path = db_path
+        self._read_only = read_only
         self._glossary = {
             key.strip().lower(): value.strip().lower()
             for key, value in (glossary or {}).items()
         }
-        self._ensure_search_index()
+        ensure_entity_search_index(self._db_path, read_only=self._read_only)
 
     def search(self, query: str, limit: int = 10, node_type: str | None = None) -> list[EntitySearchResult]:
         if not query.strip():
@@ -43,7 +50,7 @@ class EntityService:
         pattern = f"%{needle}%"
         prefix = ENTITY_TYPE_TO_PREFIX.get(node_type) if node_type else None
         fts_query = self._fts_query(self._expand_query_terms(needle))
-        with sqlite3.connect(self._db_path) as connection:
+        with self._connect() as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 """
@@ -170,8 +177,28 @@ class EntityService:
             return None
         return " OR ".join(f'"{term}"' for term in sanitized)
 
-    def _ensure_search_index(self) -> None:
-        with sqlite3.connect(self._db_path) as connection:
+    def _connect(self):
+        if self._read_only:
+            return connect_readonly_sqlite(self._db_path)
+        return connect_writable_sqlite(self._db_path)
+
+
+def ensure_entity_search_index(db_path: Path, read_only: bool) -> None:
+    connector = connect_readonly_sqlite if read_only else connect_writable_sqlite
+    with connector(db_path) as connection:
+        exists = connection.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE name = 'entity_search_fts'
+            """
+        ).fetchone()
+        if read_only and exists is None:
+            raise RuntimeError(
+                "Read-only analytics database is missing entity_search_fts. "
+                "Rebuild artifacts before deployment."
+            )
+        if not read_only:
             connection.execute(
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS entity_search_fts USING fts5(
@@ -185,32 +212,38 @@ class EntityService:
                 )
                 """
             )
-            current_count = connection.execute(
-                "SELECT COUNT(*) FROM entity_search_fts"
-            ).fetchone()[0]
-            graph_node_count = connection.execute(
-                "SELECT COUNT(*) FROM graph_nodes"
-            ).fetchone()[0]
-            if current_count != graph_node_count:
-                connection.execute("DELETE FROM entity_search_fts")
-                connection.execute(
-                    """
-                    INSERT INTO entity_search_fts (
-                        node_id,
-                        node_type,
-                        business_key,
-                        display_label,
-                        subtitle,
-                        metadata_text
-                    )
-                    SELECT
-                        node_id,
-                        node_type,
-                        business_key,
-                        display_label,
-                        COALESCE(subtitle, ''),
-                        COALESCE(metadata_json, '')
-                    FROM graph_nodes
-                    """
+        current_count = connection.execute(
+            "SELECT COUNT(*) FROM entity_search_fts"
+        ).fetchone()[0]
+        graph_node_count = connection.execute(
+            "SELECT COUNT(*) FROM graph_nodes"
+        ).fetchone()[0]
+        if read_only and current_count != graph_node_count:
+            raise RuntimeError(
+                "Read-only analytics database has an out-of-sync entity_search_fts index. "
+                "Rebuild artifacts before deployment."
+            )
+        if not read_only and current_count != graph_node_count:
+            connection.execute("DELETE FROM entity_search_fts")
+            connection.execute(
+                """
+                INSERT INTO entity_search_fts (
+                    node_id,
+                    node_type,
+                    business_key,
+                    display_label,
+                    subtitle,
+                    metadata_text
                 )
+                SELECT
+                    node_id,
+                    node_type,
+                    business_key,
+                    display_label,
+                    COALESCE(subtitle, ''),
+                    COALESCE(metadata_json, '')
+                FROM graph_nodes
+                """
+            )
+        if not read_only:
             connection.commit()

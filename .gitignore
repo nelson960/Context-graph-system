@@ -14,7 +14,16 @@ __pycache__/
 venv/
 env/
 
-artifacts/
+artifacts/*
+!artifacts/sqlite/
+artifacts/sqlite/*
+!artifacts/sqlite/context_graph.db
+artifacts/sqlite/context_graph.runtime.db
+!artifacts/reports/
+artifacts/reports/*
+!artifacts/reports/semantic_catalog.json
+artifacts/logs/
+
 sap-o2c-data/
 sap-order-to-cash-dataset.zip
 

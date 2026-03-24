@@ -11,6 +11,13 @@ KNOWN_MODEL_PROVIDER_BASE_URLS = {
 }
 
 
+def _default_project_root() -> Path:
+    cwd = Path.cwd().resolve()
+    if (cwd / "pyproject.toml").exists() and (cwd / "src" / "context_graph").exists():
+        return cwd
+    return Path(__file__).resolve().parents[2]
+
+
 def _parse_env_file(env_path: Path) -> dict[str, str]:
     if not env_path.exists():
         return {}
@@ -56,6 +63,7 @@ class AppSettings:
     dataset_root: Path
     artifacts_root: Path
     db_path: Path
+    state_db_path: Path
     frontend_root: Path
     frontend_dist: Path
     frontend_index: Path
@@ -75,7 +83,7 @@ class AppSettings:
     @classmethod
     def from_env(cls) -> "AppSettings":
         project_root = Path(
-            os.getenv("CONTEXT_GRAPH_PROJECT_ROOT", Path(__file__).resolve().parents[2])
+            os.getenv("CONTEXT_GRAPH_PROJECT_ROOT", _default_project_root())
         ).resolve()
         _load_project_env(project_root)
         artifacts_root = Path(
@@ -97,6 +105,12 @@ class AppSettings:
                     artifacts_root / "sqlite" / "context_graph.db",
                 )
             ).resolve(),
+            state_db_path=Path(
+                os.getenv(
+                    "CONTEXT_GRAPH_STATE_DB_PATH",
+                    artifacts_root / "sqlite" / "context_graph.runtime.db",
+                )
+            ).resolve(),
             frontend_root=frontend_root,
             frontend_dist=Path(
                 os.getenv("CONTEXT_GRAPH_FRONTEND_DIST", frontend_root / "dist")
@@ -114,8 +128,11 @@ class AppSettings:
                 )
             ).resolve(),
             model_provider=model_provider,
-            openai_api_key=os.getenv("MODEL_API_KEY") or os.getenv("OPENAI_API_KEY"),
-            openai_model=os.getenv("MODEL") or os.getenv("CONTEXT_GRAPH_OPENAI_MODEL", "gpt-4.1-mini"),
+            openai_api_key=os.getenv("MODEL_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+            or os.getenv("API_KEY"),
+            openai_model=os.getenv("MODEL")
+            or os.getenv("CONTEXT_GRAPH_OPENAI_MODEL", "gpt-4.1-mini"),
             openai_base_url=_model_base_url(
                 model_provider,
                 os.getenv("MODEL_BASE_URL") or os.getenv("CONTEXT_GRAPH_OPENAI_BASE_URL"),
@@ -133,4 +150,5 @@ class AppSettings:
 
     def ensure_runtime_dirs(self) -> None:
         self.artifacts_root.mkdir(parents=True, exist_ok=True)
+        self.state_db_path.parent.mkdir(parents=True, exist_ok=True)
         self.query_log_path.parent.mkdir(parents=True, exist_ok=True)

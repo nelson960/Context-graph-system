@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from pathlib import Path
 from typing import Any
 
 from context_graph.config import ALLOWED_METRICS, APPROVED_VIEWS
+from context_graph.sqlite_utils import connect_readonly_sqlite
 
 
 class CatalogService:
@@ -69,7 +69,7 @@ class CatalogService:
 
     def _discover_view_columns(self) -> dict[str, set[str]]:
         columns: dict[str, set[str]] = {}
-        with sqlite3.connect(self._db_path) as connection:
+        with connect_readonly_sqlite(self._db_path) as connection:
             for view_name in APPROVED_VIEWS:
                 cursor = connection.execute(f"SELECT * FROM {view_name} LIMIT 0")
                 column_names = {description[0] for description in cursor.description or []}

@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: context-graph
+    runtime: python
+    buildCommand: pip install . && cd frontend && npm ci && npm run build
+    startCommand: uvicorn context_graph.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: CONTEXT_GRAPH_STATE_DB_PATH
+        value: /tmp/context_graph.runtime.db
+      - key: CONTEXT_GRAPH_QUERY_LOG_PATH
+        value: /tmp/context_graph.query_events.jsonl
+      - key: MODEL_API_KEY
+        sync: false
+      - key: MODEL_PROVIDER
+        sync: false
+      - key: MODEL
+        sync: false

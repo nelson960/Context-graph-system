@@ -11,6 +11,7 @@ from sqlglot import expressions as exp
 
 from context_graph.catalog_service import CatalogService
 from context_graph.exceptions import QueryExecutionError, SqlValidationError
+from context_graph.sqlite_utils import connect_readonly_sqlite
 
 
 ALLOWED_ANONYMOUS_FUNCTIONS = {
@@ -138,7 +139,7 @@ class SqlExecutor:
     def execute(self, validation_result: SqlValidationResult) -> QueryExecutionResult:
         started = time.perf_counter()
         try:
-            with sqlite3.connect(self._db_path) as connection:
+            with connect_readonly_sqlite(self._db_path) as connection:
                 connection.row_factory = sqlite3.Row
 
                 def _abort_if_slow() -> int:

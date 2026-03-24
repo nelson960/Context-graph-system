@@ -14,9 +14,15 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 button,
@@ -35,12 +41,17 @@ pre {
 }
 
 #root {
+  height: 100%;
   min-height: 100vh;
+  overflow: hidden;
 }
 
 .shell {
-  min-height: 100vh;
+  height: 100vh;
   padding: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .masthead {
@@ -89,9 +100,10 @@ pre {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.9fr);
   gap: 1rem;
-  min-height: calc(100vh - 9.5rem);
-  max-height: calc(100vh - 9.5rem);
+  flex: 1 1 auto;
+  min-height: 0;
   align-items: stretch;
+  overflow: hidden;
 }
 
 .graph-pane,
@@ -239,6 +251,7 @@ pre {
 .info-pane {
   display: flex;
   min-height: 0;
+  overflow: hidden;
 }
 
 .panel {
@@ -250,6 +263,7 @@ pre {
 .chat-panel {
   flex: 1 1 auto;
   min-height: 0;
+  max-height: 100%;
 }
 
 .panel-header h2 {
@@ -266,6 +280,7 @@ pre {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 1rem;
   display: flex;
   flex-direction: column;
@@ -298,8 +313,95 @@ pre {
 }
 
 .message-content {
-  white-space: pre-wrap;
   line-height: 1.45;
+}
+
+.message-content > :first-child {
+  margin-top: 0;
+}
+
+.message-content > :last-child {
+  margin-bottom: 0;
+}
+
+.message-content h1,
+.message-content h2,
+.message-content h3 {
+  margin: 0 0 0.6rem;
+  line-height: 1.2;
+}
+
+.message-content h1 {
+  font-size: 1.1rem;
+}
+
+.message-content h2 {
+  font-size: 1rem;
+}
+
+.message-content h3 {
+  font-size: 0.92rem;
+}
+
+.message-content p,
+.message-content blockquote,
+.message-content ul,
+.message-content ol,
+.message-content pre {
+  margin: 0 0 0.75rem;
+}
+
+.message-content a {
+  color: #0f766e;
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+}
+
+.markdown-list {
+  padding-left: 1.1rem;
+}
+
+.markdown-list li + li {
+  margin-top: 0.28rem;
+}
+
+.message-content blockquote {
+  padding-left: 0.85rem;
+  border-left: 3px solid rgba(15, 118, 110, 0.22);
+  color: #475569;
+}
+
+.markdown-inline-code {
+  padding: 0.08rem 0.35rem;
+  border-radius: 0.45rem;
+  background: rgba(15, 23, 42, 0.08);
+  font-size: 0.88em;
+}
+
+.markdown-code-block {
+  position: relative;
+  padding: 1.35rem 0.9rem 0.9rem;
+  overflow: auto;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 0.9rem;
+  font-size: 0.78rem;
+}
+
+.markdown-code-block code {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.markdown-code-language {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.6rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #94a3b8;
 }
 
 .empty-card {
