@@ -28,6 +28,8 @@ def test_app_settings_loads_generic_model_config_from_dotenv(
                 "MODEL_API_KEY=test-model-key",
                 "MODEL_PROVIDER=cerebras",
                 "MODEL=qwen-3-235b-a22b-instruct-2507",
+                "CONTEXT_GRAPH_MODEL_MAX_RETRIES=4",
+                "CONTEXT_GRAPH_MODEL_RETRY_BACKOFF_MS=1200",
             ]
         )
     )
@@ -39,6 +41,8 @@ def test_app_settings_loads_generic_model_config_from_dotenv(
     assert settings.openai_api_key == "test-model-key"
     assert settings.openai_model == "qwen-3-235b-a22b-instruct-2507"
     assert settings.openai_base_url == "https://api.cerebras.ai/v1"
+    assert settings.model_max_retries == 4
+    assert settings.model_retry_backoff_ms == 1200
     assert settings.db_path == (tmp_path / "artifacts" / "sqlite" / "context_graph.db").resolve()
     assert settings.state_db_path == (tmp_path / "artifacts" / "sqlite" / "context_graph.runtime.db").resolve()
 

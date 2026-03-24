@@ -23,7 +23,7 @@ class QueryPlanValidator:
         if query_plan.route == "graph" and query_plan.intent == "document_trace":
             if query_plan.trace_direction is None:
                 raise PlannerError("Document-trace plans must declare trace_direction")
-        if query_plan.route in {"graph", "hybrid"}:
+        if query_plan.route == "graph":
             has_plan_entities = any(
                 entity.resolved_node_id or entity.reference
                 for entity in query_plan.entities

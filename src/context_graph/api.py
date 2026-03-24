@@ -20,6 +20,7 @@ from context_graph.schemas import (
     ChatQueryResponse,
     EntityDetailResponse,
     EntitySearchResult,
+    GraphRequest,
     GraphResponse,
 )
 
@@ -116,6 +117,58 @@ def get_path(
             depth=depth,
             cluster_mode=cluster_mode,
         )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/graph/query", response_model=GraphResponse)
+def run_graph_query(request: Request, payload: GraphRequest) -> GraphResponse:
+    runtime = _runtime(request)
+    assert runtime.graph_service is not None
+    try:
+        if payload.mode == "subgraph":
+            if len(payload.node_ids) != 1:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Subgraph requests must include exactly one node id",
+                )
+            return runtime.graph_service.get_subgraph(
+                node_id=payload.node_ids[0],
+                depth=payload.depth,
+                include_hidden=payload.include_hidden,
+                cluster_mode=payload.cluster_mode,
+            )
+        if payload.mode == "path":
+            if len(payload.node_ids) != 1:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Path requests must include exactly one node id",
+                )
+            if payload.direction is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Path requests must include a direction",
+                )
+            return runtime.graph_service.get_path(
+                node_id=payload.node_ids[0],
+                direction=payload.direction,
+                depth=payload.depth,
+                cluster_mode=payload.cluster_mode,
+            )
+        if not payload.node_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Combined subgraph requests must include at least one node id",
+            )
+        graph_response = runtime.graph_service.get_combined_subgraph(
+            node_ids=payload.node_ids,
+            depth=payload.depth,
+            include_hidden=payload.include_hidden,
+            cluster_mode=payload.cluster_mode,
+        )
+        if graph_response is None:
+            raise HTTPException(status_code=404, detail="No graph nodes matched the request")
+        return graph_response
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

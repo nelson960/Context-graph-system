@@ -12,7 +12,7 @@
     "v_billing_flow": "Billing header and item flow with upstream delivery and sales order context.",
     "v_billing_trace": "Billing-item-level lineage from sales order through payment settlement.",
     "v_customer_360": "Customer-centric rollup of order, delivery, billing, and payment activity.",
-    "v_delivery_flow": "Delivery header and item flow with upstream sales order and downstream billing context.",
+    "v_delivery_flow": "Delivery header and item flow with upstream sales order and aggregated downstream billing context.",
     "v_financial_flow": "Billing to AR journal entry to payment settlement flow.",
     "v_incomplete_order_flows": "Order and order-item anomalies, including delivered-not-billed and missing finance steps.",
     "v_product_billing_summary": "Product-level billing aggregates and distinct billing document counts.",

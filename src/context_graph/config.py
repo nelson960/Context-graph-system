@@ -355,7 +355,7 @@ BUSINESS_GLOSSARY = {
 
 APPROVED_VIEWS = {
     "v_sales_order_flow": "Sales order header and item flow with customer, product, delivery, and billing context.",
-    "v_delivery_flow": "Delivery header and item flow with upstream sales order and downstream billing context.",
+    "v_delivery_flow": "Delivery header and item flow with upstream sales order and aggregated downstream billing context.",
     "v_billing_flow": "Billing header and item flow with upstream delivery and sales order context.",
     "v_billing_trace": "Billing-item-level lineage from sales order through payment settlement.",
     "v_financial_flow": "Billing to AR journal entry to payment settlement flow.",

@@ -18,6 +18,7 @@ from context_graph.schemas import (
     PlannerEnvelope,
     QueryPlan,
     QueryPlanEntity,
+    SqlEnvelope,
 )
 from context_graph.sql_guard import SqlExecutor, SqlValidator
 
@@ -94,6 +95,104 @@ class FailingPlannerStub(GraphPlannerStub):
         raise PlannerError("Planner exploded")
 
 
+class AggregateAnalyticsPlannerStub(GraphPlannerStub):
+    def plan(self, message, selected_nodes, memory_context=None):
+        return PlannerEnvelope(
+            status="ok",
+            query_plan=QueryPlan(
+                intent="aggregate_analytics",
+                route="sql",
+                entities=[QueryPlanEntity(reference="product", entity_type="Product")],
+                metrics=["count_distinct"],
+                dimensions=[
+                    "v_product_billing_summary.product_id",
+                    "v_product_billing_summary.product_description",
+                ],
+                sort=[
+                    "v_product_billing_summary.distinct_billing_documents DESC",
+                    "v_product_billing_summary.product_id ASC",
+                ],
+                output_shape="table",
+            ),
+        )
+
+    def generate_sql(self, user_message, query_plan):
+        return SqlEnvelope(
+            sql=(
+                "SELECT "
+                "v_product_billing_summary.product_id, "
+                "v_product_billing_summary.product_description, "
+                "v_product_billing_summary.distinct_billing_documents "
+                "FROM v_product_billing_summary "
+                "WHERE v_product_billing_summary.distinct_billing_documents > 0 "
+                "ORDER BY v_product_billing_summary.distinct_billing_documents DESC, "
+                "v_product_billing_summary.product_id ASC "
+                "LIMIT 5"
+            ),
+            provenance_note="aggregate analytics sql",
+            assumptions=[],
+        )
+
+    def compose_answer(self, user_message, query_plan, sql, rows, row_count):
+        return AnswerEnvelope(
+            answer="Top billed products ranked by distinct billing documents.",
+            provenance_note="sql answer",
+            assumptions=[],
+        )
+
+
+class HybridAnomalyPlannerStub(GraphPlannerStub):
+    def plan(self, message, selected_nodes, memory_context=None):
+        return PlannerEnvelope(
+            status="ok",
+            query_plan=QueryPlan(
+                intent="anomaly_detection",
+                route="hybrid",
+                entities=[QueryPlanEntity(reference="sales_order", entity_type="SalesOrder")],
+                metrics=["count"],
+                dimensions=[
+                    "v_incomplete_order_flows.sales_order",
+                    "v_incomplete_order_flows.sales_order_item",
+                    "v_incomplete_order_flows.primary_anomaly",
+                ],
+                filters=[
+                    "v_incomplete_order_flows.has_delivery = 1",
+                    "v_incomplete_order_flows.has_billing = 0",
+                ],
+                sort=[
+                    "v_incomplete_order_flows.sales_order ASC",
+                    "v_incomplete_order_flows.sales_order_item ASC",
+                ],
+                output_shape="table",
+            ),
+        )
+
+    def generate_sql(self, user_message, query_plan):
+        return SqlEnvelope(
+            sql=(
+                "SELECT "
+                "v_incomplete_order_flows.sales_order, "
+                "v_incomplete_order_flows.sales_order_item, "
+                "v_incomplete_order_flows.primary_anomaly "
+                "FROM v_incomplete_order_flows "
+                "WHERE v_incomplete_order_flows.has_delivery = 1 "
+                "AND v_incomplete_order_flows.has_billing = 0 "
+                "ORDER BY v_incomplete_order_flows.sales_order ASC, "
+                "v_incomplete_order_flows.sales_order_item ASC "
+                "LIMIT 5"
+            ),
+            provenance_note="anomaly sql",
+            assumptions=[],
+        )
+
+    def compose_answer(self, user_message, query_plan, sql, rows, row_count):
+        return AnswerEnvelope(
+            answer="Delivered-not-billed order items identified.",
+            provenance_note="sql answer",
+            assumptions=[],
+        )
+
+
 def build_query_service(tmp_path: Path, planner=None) -> QueryService:
     test_db_path = tmp_path / "context_graph.test.db"
     state_db_path = tmp_path / "context_graph.runtime.db"
@@ -157,6 +256,9 @@ def test_query_service_executes_graph_route_without_sql(tmp_path) -> None:
     assert response.route == "graph"
     assert response.sql is None
     assert response.graph_center_node_id == "plant:AS05"
+    assert response.graph is not None
+    assert response.graph_request is not None
+    assert response.graph_request.mode == "subgraph"
     assert any(node.id == "plant:AS05" for node in response.cited_nodes)
     assert response.conversation_id is not None
     assert response.memory_state is not None
@@ -175,6 +277,25 @@ def test_query_service_short_circuits_clear_entity_lookup_before_planner(tmp_pat
     assert "entity lookup" in response.assumptions[0].lower()
 
 
+def test_explicit_graph_entity_overrides_stale_selected_node_ids(tmp_path) -> None:
+    query_service = build_query_service(tmp_path, planner=NoPlanLookupStub())
+    response = query_service.handle_chat_request(
+        ChatQueryRequest(
+            message="explain AS05",
+            selectedNodeIds=["billing_document:90504219"],
+        )
+    )
+
+    assert response.error is None
+    assert response.route == "graph"
+    assert response.graph_center_node_id == "plant:AS05"
+    assert response.graph_request is not None
+    assert response.graph_request.mode == "subgraph"
+    assert response.graph_request.node_ids == ["plant:AS05"]
+    assert response.memory_state is not None
+    assert response.memory_state.selected_node_ids == ["plant:AS05"]
+
+
 def test_query_service_stream_chat_request_emits_answer_deltas_and_final(tmp_path) -> None:
     query_service = build_query_service(tmp_path)
     events = list(query_service.stream_chat_request(ChatQueryRequest(message="explain as05")))
@@ -186,6 +307,7 @@ def test_query_service_stream_chat_request_emits_answer_deltas_and_final(tmp_pat
     assert final_payload["route"] == "graph"
     assert final_payload["answer"] == "Plant AS05"
     assert final_payload["graph_center_node_id"] == "plant:AS05"
+    assert final_payload["graph_request"]["mode"] == "subgraph"
 
 
 def test_query_service_reuses_conversation_entities_when_follow_up_is_implicit(tmp_path) -> None:
@@ -209,6 +331,34 @@ def test_query_service_reuses_conversation_entities_when_follow_up_is_implicit(t
         entity.resolved_node_id == "plant:AS05"
         for entity in second_response.memory_state.resolved_entities
     )
+
+
+def test_query_service_ignores_generic_planner_entities_for_aggregate_sql(tmp_path) -> None:
+    query_service = build_query_service(tmp_path, planner=AggregateAnalyticsPlannerStub())
+    response = query_service.handle_chat_request(
+        ChatQueryRequest(message="Which products are associated with the highest number of billing documents?")
+    )
+
+    assert response.error is None
+    assert response.route == "sql"
+    assert response.row_count == 5
+    assert response.rows[0]["product_id"] == "S8907367008620"
+    assert response.graph_center_node_id == "product:S8907367008620"
+    assert response.graph_request is not None
+    assert response.graph_request.mode == "combined_subgraph"
+
+
+def test_query_service_ignores_generic_planner_entities_for_hybrid_sql(tmp_path) -> None:
+    query_service = build_query_service(tmp_path, planner=HybridAnomalyPlannerStub())
+    response = query_service.handle_chat_request(
+        ChatQueryRequest(message="Identify sales orders that were delivered but not billed.")
+    )
+
+    assert response.error is None
+    assert response.route == "hybrid"
+    assert response.row_count == 5
+    assert response.rows[0]["sales_order"] == "740506"
+    assert response.graph_center_node_id == "sales_order:740506"
 
 
 def test_query_service_raises_instead_of_returning_error_payload(tmp_path) -> None:

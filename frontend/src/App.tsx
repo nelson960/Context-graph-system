@@ -14,8 +14,7 @@ import cytoscape, { type Core, type ElementDefinition, type StylesheetJson } fro
 
 import {
   fetchEntity,
-  fetchPath,
-  fetchSubgraph,
+  fetchGraphQuery,
   searchEntities,
   submitChatQueryStream,
 } from "./api";
@@ -24,6 +23,7 @@ import type {
   ChatStreamEvent,
   EntityDetailResponse,
   EntitySearchResult,
+  GraphRequest,
   GraphResponse,
 } from "./types";
 
@@ -153,6 +153,7 @@ export function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodeDetail, setSelectedNodeDetail] = useState<EntityDetailResponse | null>(null);
   const [graphData, setGraphData] = useState<GraphResponse | null>(null);
+  const [graphRequest, setGraphRequest] = useState<GraphRequest | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -366,18 +367,36 @@ export function App() {
     });
   }
 
+  async function loadGraph(request: GraphRequest, nextClusterMode: "type" | null = clusterMode) {
+    const graph = await fetchGraphQuery({
+      ...request,
+      cluster_mode: nextClusterMode,
+    });
+    startTransition(() => {
+      setGraphRequest(request);
+      setGraphData(graph);
+      setGraphError(null);
+    });
+    return graph;
+  }
+
   async function handleSearchPick(result: EntitySearchResult) {
     setSearchText(result.display_label);
     setSearchResults([]);
-    const [detail, subgraph] = await Promise.all([
+    const request: GraphRequest = {
+      mode: "subgraph",
+      node_ids: [result.node_id],
+      depth: 1,
+      include_hidden: false,
+    };
+    const [detail, graph] = await Promise.all([
       fetchEntity(result.node_id),
-      fetchSubgraph(result.node_id, 1, false, clusterMode),
+      loadGraph(request),
     ]);
     startTransition(() => {
       setSelectedNodeId(result.node_id);
       setSelectedNodeDetail(detail);
-      setGraphData(subgraph);
-      setGraphError(null);
+      setGraphData(graph);
       setLatestResponse(null);
     });
   }
@@ -386,10 +405,11 @@ export function App() {
     if (!selectedNodeId) {
       return;
     }
-    const subgraph = await fetchSubgraph(selectedNodeId, 2, true, clusterMode);
-    startTransition(() => {
-      setGraphData(subgraph);
-      setGraphError(null);
+    await loadGraph({
+      mode: "subgraph",
+      node_ids: [selectedNodeId],
+      depth: 2,
+      include_hidden: true,
     });
   }
 
@@ -399,10 +419,11 @@ export function App() {
     }
     setIsTracing(true);
     try {
-      const pathGraph = await fetchPath(selectedNodeId, "both", 6, clusterMode);
-      startTransition(() => {
-        setGraphData(pathGraph);
-        setGraphError(null);
+      await loadGraph({
+        mode: "path",
+        node_ids: [selectedNodeId],
+        depth: 6,
+        direction: "both",
       });
     } finally {
       setIsTracing(false);
@@ -412,17 +433,10 @@ export function App() {
   async function handleToggleClusterMode() {
     const nextMode = clusterMode ? null : "type";
     setClusterMode(nextMode);
-    if (!selectedNodeId) {
+    if (!graphRequest) {
       return;
     }
-    const graph =
-      latestResponse?.intent === "document_trace"
-        ? await fetchPath(selectedNodeId, "both", 6, nextMode)
-        : await fetchSubgraph(selectedNodeId, 2, true, nextMode);
-    startTransition(() => {
-      setGraphData(graph);
-      setGraphError(null);
-    });
+    await loadGraph(graphRequest, nextMode);
   }
 
   function handleCloseNodeDetail() {
@@ -547,17 +561,15 @@ export function App() {
               ),
             );
           });
-          if (response.graph_center_node_id) {
-            const route = response.intent === "document_trace" ? "path" : "subgraph";
-            const graph =
-              route === "path"
-                ? await fetchPath(response.graph_center_node_id, "both", 6, clusterMode)
-                : await fetchSubgraph(response.graph_center_node_id, 2, true, clusterMode);
+          if (response.graph) {
             startTransition(() => {
-              setGraphData(graph);
+              setGraphData(response.graph);
+              setGraphRequest(response.graph_request);
               setSelectedNodeId(response.graph_center_node_id);
               setGraphError(null);
             });
+          }
+          if (response.graph_center_node_id) {
             const detail = await fetchEntity(response.graph_center_node_id);
             startTransition(() => {
               setSelectedNodeDetail(detail);

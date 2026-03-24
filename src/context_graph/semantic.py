@@ -112,6 +112,19 @@ def create_sql_views(engine: Engine) -> None:
     DROP VIEW IF EXISTS v_billing_trace;
     DROP VIEW IF EXISTS v_delivery_flow;
     CREATE VIEW v_delivery_flow AS
+    WITH billing_agg AS (
+        SELECT
+            delivery_document,
+            delivery_document_item,
+            COUNT(DISTINCT billing_document) AS billing_count,
+            GROUP_CONCAT(DISTINCT billing_document) AS billing_documents,
+            SUM(billing_quantity) AS billed_quantity,
+            SUM(billing_net_amount) AS billed_net_amount,
+            GROUP_CONCAT(DISTINCT billing_currency) AS billing_currencies
+        FROM delivery_to_billing_bridge
+        WHERE link_status = 'direct'
+        GROUP BY delivery_document, delivery_document_item
+    )
     SELECT
         d.deliveryDocument AS delivery_document,
         di.deliveryDocumentItem AS delivery_document_item,
@@ -128,10 +141,11 @@ def create_sql_views(engine: Engine) -> None:
         di.storageLocation AS storage_location,
         soi.material AS product_id,
         pd.productDescription AS product_description,
-        dtb.billing_document,
-        dtb.billing_document_item,
-        dtb.billing_net_amount,
-        dtb.billing_currency
+        billing_agg.billing_count,
+        billing_agg.billing_documents,
+        billing_agg.billed_quantity,
+        billing_agg.billed_net_amount,
+        billing_agg.billing_currencies
     FROM deliveries AS d
     JOIN delivery_items AS di
       ON di.deliveryDocument = d.deliveryDocument
@@ -149,10 +163,9 @@ def create_sql_views(engine: Engine) -> None:
     LEFT JOIN product_descriptions AS pd
       ON pd.product = soi.material
      AND pd.language = 'EN'
-    LEFT JOIN delivery_to_billing_bridge AS dtb
-      ON dtb.delivery_document = di.deliveryDocument
-     AND dtb.delivery_document_item = di.deliveryDocumentItem
-     AND dtb.link_status = 'direct';
+    LEFT JOIN billing_agg
+      ON billing_agg.delivery_document = di.deliveryDocument
+     AND billing_agg.delivery_document_item = di.deliveryDocumentItem;
 
     DROP VIEW IF EXISTS v_billing_flow;
     CREATE VIEW v_billing_flow AS

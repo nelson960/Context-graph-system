@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import sqlite3
 
 from fastapi.testclient import TestClient
 
@@ -44,6 +45,24 @@ def test_graph_path_returns_billing_trace() -> None:
     node_ids = {node["id"] for node in payload["nodes"]}
     assert "billing_document:90504219" in node_ids
     assert "delivery:80738051" in node_ids
+    assert "sales_order:740520" in node_ids
+
+
+def test_graph_query_supports_combined_subgraphs() -> None:
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/graph/query",
+        json={
+            "mode": "combined_subgraph",
+            "node_ids": ["billing_document:90504219", "sales_order:740520"],
+            "depth": 1,
+            "include_hidden": False,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    node_ids = {node["id"] for node in payload["nodes"]}
+    assert "billing_document:90504219" in node_ids
     assert "sales_order:740520" in node_ids
 
 
@@ -124,3 +143,16 @@ def test_sql_validator_rejects_non_approved_tables() -> None:
         assert "not approved" in str(exc)
     else:  # pragma: no cover
         raise AssertionError("Expected raw-table SQL to be rejected")
+
+
+def test_delivery_flow_view_preserves_one_row_per_delivery_item() -> None:
+    db_path = PROJECT_ROOT / "artifacts" / "sqlite" / "context_graph.db"
+    with sqlite3.connect(db_path) as connection:
+        row_count = connection.execute("SELECT COUNT(*) FROM v_delivery_flow").fetchone()[0]
+        distinct_item_count = connection.execute(
+            """
+            SELECT COUNT(DISTINCT delivery_document || ':' || delivery_document_item)
+            FROM v_delivery_flow
+            """
+        ).fetchone()[0]
+    assert row_count == distinct_item_count

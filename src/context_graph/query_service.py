@@ -17,9 +17,11 @@ from context_graph.schemas import (
     ChatQueryRequest,
     ChatQueryResponse,
     ConversationMemoryState,
+    GraphRequest,
     GraphResponse,
     NodeDTO,
     QueryPlan,
+    QueryPlanEntity,
 )
 from context_graph.sql_guard import QueryExecutionResult, SqlExecutor, SqlValidationResult, SqlValidator
 
@@ -30,6 +32,7 @@ class ExecutionArtifacts:
     sql_validation: SqlValidationResult | None
     execution: QueryExecutionResult | None
     graph_response: GraphResponse | None
+    graph_request: GraphRequest | None
     center_node: NodeDTO | None
     evidence: EvidenceBundle
     provenance_note: str
@@ -90,7 +93,7 @@ class QueryService:
                 memory_state=self._memory_state(
                     query_plan=query_plan,
                     selected_node_ids=selected_node_ids,
-                    evidence=artifacts.evidence,
+                    artifacts=artifacts,
                 ),
                 provenance_note=answer_envelope.provenance_note or artifacts.provenance_note,
             )
@@ -147,23 +150,23 @@ class QueryService:
                 "graph_center_node_id": artifacts.evidence.graph_center_node_id,
             }
             yield {"type": "status", "stage": "answering", "message": "Composing answer"}
-            answer_parts: list[str] = []
-            for delta in self._compose_streaming_answer(request, artifacts):
-                answer_parts.append(delta)
+            answer_envelope = self._compose_non_stream_answer(request, artifacts)
+            for delta in self._stream_text_chunks(answer_envelope.answer):
                 yield {"type": "answer_delta", "delta": delta}
-            answer = "".join(answer_parts).strip()
             response = self._build_response(
                 request=request,
                 conversation_id=conversation_id,
                 artifacts=artifacts,
-                answer=answer or None,
-                assumptions=list(dict.fromkeys(query_plan.assumptions)),
+                answer=answer_envelope.answer or None,
+                assumptions=list(
+                    dict.fromkeys(query_plan.assumptions + answer_envelope.assumptions)
+                ),
                 memory_state=self._memory_state(
                     query_plan=query_plan,
                     selected_node_ids=selected_node_ids,
-                    evidence=artifacts.evidence,
+                    artifacts=artifacts,
                 ),
-                provenance_note=artifacts.provenance_note,
+                provenance_note=answer_envelope.provenance_note or artifacts.provenance_note,
             )
             self._record_and_log_success(
                 conversation_id=conversation_id,
@@ -196,7 +199,6 @@ class QueryService:
         query_plan = self._deterministic_entity_lookup_plan(
             request.message,
             planning_context["candidate_entities"],
-            selected_node_ids,
         )
         if query_plan is None:
             planner_envelope = self._planner.plan(
@@ -258,29 +260,50 @@ class QueryService:
         if not candidate_node_ids:
             raise EntityResolutionError("Graph route did not resolve any graph nodes")
         if query_plan.intent == "document_trace":
-            graph_response = self._graph_service.get_path(
-                node_id=candidate_node_ids[0],
-                direction=query_plan.trace_direction,
+            graph_request = GraphRequest(
+                mode="path",
+                node_ids=[candidate_node_ids[0]],
                 depth=6,
+                direction=query_plan.trace_direction,
                 cluster_mode=request.clusterMode,
             )
+            graph_response = self._graph_service.get_path(
+                node_id=graph_request.node_ids[0],
+                direction=graph_request.direction,
+                depth=graph_request.depth,
+                cluster_mode=graph_request.cluster_mode,
+            )
         elif len(candidate_node_ids) > 1:
-            graph_response = self._graph_service.get_combined_subgraph(
-                candidate_node_ids[:6],
+            graph_request = GraphRequest(
+                mode="combined_subgraph",
+                node_ids=candidate_node_ids[:6],
                 depth=2,
                 include_hidden=False,
                 cluster_mode=request.clusterMode,
+            )
+            graph_response = self._graph_service.get_combined_subgraph(
+                graph_request.node_ids,
+                depth=graph_request.depth,
+                include_hidden=graph_request.include_hidden,
+                cluster_mode=graph_request.cluster_mode,
             )
             if graph_response is None:
                 raise QueryExecutionError(
                     "Could not derive a combined graph response for the selected entities"
                 )
         else:
-            graph_response = self._graph_service.get_subgraph(
-                node_id=candidate_node_ids[0],
+            graph_request = GraphRequest(
+                mode="subgraph",
+                node_ids=[candidate_node_ids[0]],
                 depth=2 if query_plan.intent == "relationship_exploration" else 1,
                 include_hidden=False,
                 cluster_mode=request.clusterMode,
+            )
+            graph_response = self._graph_service.get_subgraph(
+                node_id=graph_request.node_ids[0],
+                depth=graph_request.depth,
+                include_hidden=graph_request.include_hidden,
+                cluster_mode=graph_request.cluster_mode,
             )
         evidence = self._evidence_service.from_graph_response(
             graph_response,
@@ -296,6 +319,7 @@ class QueryService:
             sql_validation=None,
             execution=None,
             graph_response=graph_response,
+            graph_request=graph_request,
             center_node=center_node,
             evidence=evidence,
             provenance_note=(
@@ -320,14 +344,25 @@ class QueryService:
             ]
             + selected_node_ids,
         )
-        graph_response = (
-            self._graph_service.get_combined_subgraph(
-                base_evidence.highlighted_node_ids[:6],
+        graph_request = (
+            GraphRequest(
+                mode="combined_subgraph",
+                node_ids=base_evidence.highlighted_node_ids[:6],
                 depth=1,
                 include_hidden=False,
                 cluster_mode=request.clusterMode,
             )
             if base_evidence.highlighted_node_ids
+            else None
+        )
+        graph_response = (
+            self._graph_service.get_combined_subgraph(
+                graph_request.node_ids,
+                depth=graph_request.depth,
+                include_hidden=graph_request.include_hidden,
+                cluster_mode=graph_request.cluster_mode,
+            )
+            if graph_request is not None
             else None
         )
         graph_evidence = (
@@ -349,6 +384,7 @@ class QueryService:
             sql_validation=validation,
             execution=execution,
             graph_response=graph_response,
+            graph_request=graph_request,
             center_node=center_node,
             evidence=evidence,
             provenance_note=sql_envelope.provenance_note,
@@ -368,29 +404,6 @@ class QueryService:
             )
         assert artifacts.execution is not None
         return self._planner.compose_answer(
-            user_message=request.message,
-            query_plan=artifacts.query_plan,
-            sql=artifacts.execution.executed_sql,
-            rows=artifacts.execution.rows,
-            row_count=artifacts.execution.row_count,
-        )
-
-    def _compose_streaming_answer(
-        self,
-        request: ChatQueryRequest,
-        artifacts: ExecutionArtifacts,
-    ) -> Iterator[str]:
-        if artifacts.query_plan.route == "graph":
-            assert artifacts.graph_response is not None
-            yield from self._planner.stream_graph_answer(
-                user_message=request.message,
-                query_plan=artifacts.query_plan,
-                center_node=artifacts.center_node,
-                graph_response=artifacts.graph_response,
-            )
-            return
-        assert artifacts.execution is not None
-        yield from self._planner.stream_sql_answer(
             user_message=request.message,
             query_plan=artifacts.query_plan,
             sql=artifacts.execution.executed_sql,
@@ -424,6 +437,8 @@ class QueryService:
             cited_nodes=artifacts.evidence.cited_nodes,
             cited_edges=artifacts.evidence.cited_edges,
             graph_center_node_id=artifacts.evidence.graph_center_node_id,
+            graph=artifacts.graph_response,
+            graph_request=artifacts.graph_request,
             provenance_note=provenance_note,
             memory_state=memory_state,
             error=None,
@@ -468,22 +483,33 @@ class QueryService:
                 "highlighted_edge_ids": response.highlighted_edge_ids,
                 "cited_node_ids": [node.id for node in response.cited_nodes],
                 "cited_edge_ids": [edge.id for edge in response.cited_edges],
+                "graph_request": response.graph_request.model_dump() if response.graph_request else None,
                 "answer": response.answer,
                 "result": response.model_dump(),
             }
         )
         self._query_logger.write(event)
 
+    def _stream_text_chunks(self, text: str) -> Iterator[str]:
+        stripped = text.strip()
+        if not stripped:
+            return
+        lines = stripped.splitlines(keepends=True)
+        for line in lines:
+            if line:
+                yield line
+
     def _graph_candidate_nodes(
         self,
         query_plan: QueryPlan,
         selected_node_ids: list[str],
     ) -> list[str]:
-        candidate_node_ids = [
+        explicit_node_ids = [
             entity.resolved_node_id
             for entity in query_plan.entities
             if entity.resolved_node_id
-        ] + selected_node_ids
+        ]
+        candidate_node_ids = explicit_node_ids or selected_node_ids
         return self._graph_service.filter_existing_node_ids(list(dict.fromkeys(candidate_node_ids)))
 
     def _memory_context_for_prompt(
@@ -537,9 +563,8 @@ class QueryService:
         self,
         message: str,
         candidate_entities: list[dict[str, Any]],
-        selected_node_ids: list[str],
     ) -> QueryPlan | None:
-        if selected_node_ids or not candidate_entities:
+        if not candidate_entities:
             return None
         top_candidate = candidate_entities[0]
         top_score = int(top_candidate["score"])
@@ -634,12 +659,19 @@ class QueryService:
         query_plan: QueryPlan,
         conversation_context: ConversationContext | None,
     ) -> QueryPlan:
-        if not query_plan.entities and conversation_context and conversation_context.state.resolved_entities:
+        if (
+            not query_plan.entities
+            and conversation_context
+            and conversation_context.state.resolved_entities
+            and query_plan.route == "graph"
+        ):
             return query_plan.model_copy(
                 update={"entities": conversation_context.state.resolved_entities}
             )
         resolved_entities = []
         for entity in query_plan.entities:
+            if self._is_generic_entity_reference(entity):
+                continue
             if entity.resolved_node_id and entity.resolved_business_key:
                 resolved_entities.append(entity)
                 continue
@@ -657,17 +689,72 @@ class QueryService:
             )
         return query_plan.model_copy(update={"entities": resolved_entities})
 
+    def _is_generic_entity_reference(self, entity: QueryPlanEntity) -> bool:
+        if entity.resolved_node_id or entity.resolved_business_key:
+            return False
+        if not entity.entity_type or not entity.reference.strip():
+            return False
+        normalized_reference = self._normalize_entity_term(entity.reference)
+        if not normalized_reference:
+            return False
+        return normalized_reference in self._generic_entity_terms(entity.entity_type)
+
+    def _generic_entity_terms(self, entity_type: str) -> set[str]:
+        base = self._split_entity_type(entity_type)
+        if not base:
+            return set()
+        variants = {
+            base,
+            base.replace(" ", "_"),
+            base.replace(" ", ""),
+        }
+        plural = self._pluralize_entity_phrase(base)
+        variants.update(
+            {
+                plural,
+                plural.replace(" ", "_"),
+                plural.replace(" ", ""),
+            }
+        )
+        return {self._normalize_entity_term(value) for value in variants if value}
+
+    def _split_entity_type(self, entity_type: str) -> str:
+        with_spaces = re.sub(r"(?<!^)(?=[A-Z])", " ", entity_type).strip().lower()
+        return re.sub(r"\s+", " ", with_spaces).strip()
+
+    def _pluralize_entity_phrase(self, phrase: str) -> str:
+        tokens = phrase.split()
+        if not tokens:
+            return phrase
+        last = tokens[-1]
+        if last.endswith("y") and len(last) > 1 and last[-2] not in {"a", "e", "i", "o", "u"}:
+            tokens[-1] = f"{last[:-1]}ies"
+        elif last.endswith(("s", "x", "z", "ch", "sh")):
+            tokens[-1] = f"{last}es"
+        else:
+            tokens[-1] = f"{last}s"
+        return " ".join(tokens)
+
+    def _normalize_entity_term(self, value: str) -> str:
+        lowered = value.strip().lower().replace("-", " ").replace("_", " ")
+        return re.sub(r"\s+", " ", lowered).strip()
+
     def _memory_state(
         self,
         query_plan: QueryPlan,
         selected_node_ids: list[str],
-        evidence: EvidenceBundle,
+        artifacts: ExecutionArtifacts,
     ) -> ConversationMemoryState:
+        effective_selected_node_ids = (
+            artifacts.graph_request.node_ids
+            if artifacts.graph_request is not None
+            else selected_node_ids
+        )
         return ConversationMemoryState(
-            selected_node_ids=selected_node_ids,
+            selected_node_ids=effective_selected_node_ids,
             resolved_entities=query_plan.entities,
-            highlighted_node_ids=evidence.highlighted_node_ids,
-            graph_center_node_id=evidence.graph_center_node_id,
+            highlighted_node_ids=artifacts.evidence.highlighted_node_ids,
+            graph_center_node_id=artifacts.evidence.graph_center_node_id,
             active_filters=query_plan.filters,
             last_intent=query_plan.intent,
             last_route=query_plan.route,

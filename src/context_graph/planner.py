@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import time
 import textwrap
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Callable, TypeVar
 
-from openai import OpenAI
+from openai import APIConnectionError, APIStatusError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
 
 from context_graph.catalog_service import CatalogService
 from context_graph.exceptions import ConfigurationError, PlannerError
@@ -16,6 +17,9 @@ from context_graph.settings import AppSettings
 DOMAIN_REFUSAL_MESSAGE = (
     "This system is designed to answer questions about the provided order-to-cash dataset only."
 )
+
+RETRYABLE_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504}
+T = TypeVar("T")
 
 
 PLANNER_EXAMPLES = textwrap.dedent(
@@ -190,15 +194,14 @@ class OpenAIPlanner:
             if self._settings.openai_base_url:
                 client_kwargs["base_url"] = self._settings.openai_base_url
             self._client = OpenAI(**client_kwargs)
-        try:
-            request_kwargs = self._chat_completion_kwargs(
-                instructions=instructions,
-                prompt=prompt,
-                stream=False,
-            )
-            response = self._client.chat.completions.create(**request_kwargs)
-        except Exception as exc:  # pragma: no cover - network-dependent path
-            raise PlannerError(f"Model request failed: {exc}") from exc
+        request_kwargs = self._chat_completion_kwargs(
+            instructions=instructions,
+            prompt=prompt,
+            stream=False,
+        )
+        response = self._request_with_retry(
+            lambda: self._client.chat.completions.create(**request_kwargs)
+        )
         output_text = self._extract_chat_completion_text(response)
         if not output_text:
             raise PlannerError("Model response did not contain output text")
@@ -214,16 +217,15 @@ class OpenAIPlanner:
             if self._settings.openai_base_url:
                 client_kwargs["base_url"] = self._settings.openai_base_url
             self._client = OpenAI(**client_kwargs)
-        try:
-            stream = self._client.chat.completions.create(
+        stream = self._request_with_retry(
+            lambda: self._client.chat.completions.create(
                 **self._chat_completion_kwargs(
                     instructions=instructions,
                     prompt=prompt,
                     stream=True,
                 )
             )
-        except Exception as exc:  # pragma: no cover - network-dependent path
-            raise PlannerError(f"Model request failed: {exc}") from exc
+        )
         for chunk in stream:
             choices = getattr(chunk, "choices", None) or []
             if not choices:
@@ -266,6 +268,39 @@ class OpenAIPlanner:
             return "\n".join(part for part in text_parts if part)
         return ""
 
+    def _request_with_retry(self, request_fn: Callable[[], T]) -> T:
+        attempts = max(1, self._settings.model_max_retries + 1)
+        backoff_seconds = max(0, self._settings.model_retry_backoff_ms) / 1000
+        last_error: Exception | None = None
+        for attempt_index in range(attempts):
+            try:
+                return request_fn()
+            except Exception as exc:  # pragma: no cover - network-dependent path
+                last_error = exc
+                if not self._is_retryable_model_error(exc) or attempt_index == attempts - 1:
+                    attempts_used = attempt_index + 1
+                    raise PlannerError(
+                        f"Model request failed after {attempts_used} attempt(s): {exc}"
+                    ) from exc
+                if backoff_seconds > 0:
+                    time.sleep(backoff_seconds * (attempt_index + 1))
+        raise PlannerError(f"Model request failed: {last_error}")
+
+    def _is_retryable_model_error(self, exc: Exception) -> bool:
+        if isinstance(
+            exc,
+            (RateLimitError, APITimeoutError, APIConnectionError, InternalServerError),
+        ):
+            return True
+        if isinstance(exc, APIStatusError):
+            status_code = getattr(exc, "status_code", None)
+            return status_code in RETRYABLE_STATUS_CODES
+        status_code = getattr(exc, "status_code", None)
+        if status_code in RETRYABLE_STATUS_CODES:
+            return True
+        message = str(exc).lower()
+        return "queue_exceeded" in message or "high traffic" in message
+
     def _planner_instructions(self) -> str:
         schema = json.dumps(PlannerEnvelope.model_json_schema(), indent=2)
         return textwrap.dedent(
@@ -281,6 +316,12 @@ class OpenAIPlanner:
 
             If the question is in domain, return JSON matching this schema:
             {schema}
+
+            Entity rules:
+            - Populate query_plan.entities only for concrete dataset instances explicitly named by the user.
+            - Concrete instances are business keys such as specific billing documents, sales orders, customers, plants, or products.
+            - Do not put schema nouns or broad categories into entities.
+            - Examples of forbidden generic entity references: "product", "products", "sales_order", "sales orders", "billing document", "customers".
             """
         ).strip()
 

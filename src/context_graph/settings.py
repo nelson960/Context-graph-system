@@ -73,6 +73,8 @@ class AppSettings:
     openai_model: str
     openai_base_url: str | None
     openai_reasoning_effort: str
+    model_max_retries: int
+    model_retry_backoff_ms: int
     max_query_rows: int
     query_timeout_ms: int
     default_graph_depth: int
@@ -139,6 +141,10 @@ class AppSettings:
             ),
             openai_reasoning_effort=os.getenv(
                 "CONTEXT_GRAPH_OPENAI_REASONING_EFFORT", "medium"
+            ),
+            model_max_retries=int(os.getenv("CONTEXT_GRAPH_MODEL_MAX_RETRIES", "2")),
+            model_retry_backoff_ms=int(
+                os.getenv("CONTEXT_GRAPH_MODEL_RETRY_BACKOFF_MS", "750")
             ),
             max_query_rows=int(os.getenv("CONTEXT_GRAPH_MAX_QUERY_ROWS", "200")),
             query_timeout_ms=int(os.getenv("CONTEXT_GRAPH_QUERY_TIMEOUT_MS", "5000")),

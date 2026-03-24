@@ -15,6 +15,7 @@ IntentType = Literal[
 RouteType = Literal["sql", "graph", "hybrid"]
 TraceDirection = Literal["upstream", "downstream", "both"]
 ClusterMode = Literal["type"]
+GraphRequestMode = Literal["subgraph", "path", "combined_subgraph"]
 
 
 class NodeDTO(BaseModel):
@@ -52,6 +53,15 @@ class GraphResponse(BaseModel):
     depth: int
     nodes: list[NodeDTO]
     edges: list[EdgeDTO]
+    cluster_mode: ClusterMode | None = None
+
+
+class GraphRequest(BaseModel):
+    mode: GraphRequestMode
+    node_ids: list[str] = Field(default_factory=list)
+    depth: int
+    include_hidden: bool = False
+    direction: TraceDirection | None = None
     cluster_mode: ClusterMode | None = None
 
 
@@ -156,6 +166,8 @@ class ChatQueryResponse(BaseModel):
     cited_nodes: list[CitationNode] = Field(default_factory=list)
     cited_edges: list[CitationEdge] = Field(default_factory=list)
     graph_center_node_id: str | None = None
+    graph: GraphResponse | None = None
+    graph_request: GraphRequest | None = None
     provenance_note: str | None = None
     memory_state: ConversationMemoryState | None = None
     error: str | None = None

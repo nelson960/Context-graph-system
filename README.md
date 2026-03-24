@@ -30,6 +30,13 @@ Requirements:
 Required artifact:
 
 - `artifacts/sqlite/context_graph.db`
+- `artifacts/reports/semantic_catalog.json`
+
+If artifacts are missing, build them explicitly:
+
+```bash
+python3 scripts/build_context_graph.py
+```
 
 Install and build:
 
@@ -70,6 +77,7 @@ At runtime:
 - `artifacts/sqlite/context_graph.db` is opened read-only
 - runtime conversation state is stored separately
 - graph data is loaded from SQLite into memory for traversal and focused subgraph retrieval
+- application startup fails fast if required analytical artifacts are missing
 
 ## LLM Prompting Strategy
 
@@ -93,7 +101,7 @@ The system is intentionally restrictive.
 
 - No raw-table SQL from the planner
 - No write queries
-- No hidden fallbacks
+- No hidden fallbacks, including silent artifact rebuilds at startup
 - No fabricated graph links
 - No out-of-domain answers
 

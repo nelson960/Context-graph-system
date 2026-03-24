@@ -36,6 +36,15 @@ export type GraphResponse = {
   cluster_mode?: "type" | null;
 };
 
+export type GraphRequest = {
+  mode: "subgraph" | "path" | "combined_subgraph";
+  node_ids: string[];
+  depth: number;
+  include_hidden?: boolean;
+  direction?: "upstream" | "downstream" | "both" | null;
+  cluster_mode?: "type" | null;
+};
+
 export type EntitySearchResult = {
   node_id: string;
   node_type: string;
@@ -95,6 +104,8 @@ export type ChatQueryResponse = {
   cited_nodes: CitationNode[];
   cited_edges: CitationEdge[];
   graph_center_node_id: string | null;
+  graph: GraphResponse | null;
+  graph_request: GraphRequest | null;
   provenance_note: string | null;
   memory_state: ConversationMemoryState | null;
   error: string | null;

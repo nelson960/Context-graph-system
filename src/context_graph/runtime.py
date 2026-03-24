@@ -9,7 +9,6 @@ from context_graph.entity_service import EntityService
 from context_graph.graph_service import GraphService
 from context_graph.observability import QueryLogger
 from context_graph.plan_validator import QueryPlanValidator
-from context_graph.pipeline import build_context_graph_artifacts
 from context_graph.planner import OpenAIPlanner
 from context_graph.query_service import QueryService
 from context_graph.settings import AppSettings
@@ -68,16 +67,21 @@ class AppRuntime:
 
     def _ensure_artifacts(self) -> None:
         semantic_catalog_path = self.settings.artifacts_root / "reports" / "semantic_catalog.json"
-        required_paths = [
+        required_paths = (
             self.settings.db_path,
             semantic_catalog_path,
-        ]
-        if all(path.exists() for path in required_paths):
-            return
-        build_context_graph_artifacts(
-            dataset_root=self.settings.dataset_root,
-            output_root=self.settings.artifacts_root,
         )
+        missing_paths = [
+            str(path)
+            for path in required_paths
+            if not path.exists()
+        ]
+        if missing_paths:
+            raise FileNotFoundError(
+                "Required context graph artifacts are missing. "
+                "Build them explicitly with `python3 scripts/build_context_graph.py` before startup: "
+                + ", ".join(missing_paths)
+            )
 
 
 def build_runtime() -> AppRuntime:

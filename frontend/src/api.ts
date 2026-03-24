@@ -1,6 +1,7 @@
 import type {
   ChatQueryRequest,
   ChatQueryResponse,
+  GraphRequest,
   ChatStreamEvent,
   EntityDetailResponse,
   EntitySearchResult,
@@ -56,6 +57,13 @@ export function fetchPath(
       clusterMode ? `&cluster_mode=${encodeURIComponent(clusterMode)}` : ""
     }`,
   );
+}
+
+export function fetchGraphQuery(payload: GraphRequest): Promise<GraphResponse> {
+  return apiRequest("/api/graph/query", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function submitChatQuery(
