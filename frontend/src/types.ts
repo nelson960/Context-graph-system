@@ -117,4 +117,5 @@ export type ChatStreamEvent =
       graph_center_node_id: string | null;
     }
   | { type: "answer_delta"; delta: string }
+  | { type: "error"; error: string }
   | { type: "final"; data: ChatQueryResponse };

@@ -494,6 +494,16 @@ export function App() {
             );
             return;
           }
+          if (streamEvent.type === "error") {
+            setMessages((current) =>
+              current.map((item) =>
+                item.id === assistantMessageId
+                  ? { ...item, content: streamEvent.error }
+                  : item,
+              ),
+            );
+            return;
+          }
           if (streamEvent.type !== "final") {
             return;
           }

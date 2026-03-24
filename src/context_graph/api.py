@@ -5,6 +5,15 @@ import json
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from context_graph.exceptions import (
+    AmbiguousEntityError,
+    ConfigurationError,
+    ContextGraphError,
+    EntityResolutionError,
+    PlannerError,
+    QueryExecutionError,
+    SqlValidationError,
+)
 from context_graph.runtime import AppRuntime
 from context_graph.schemas import (
     ChatQueryRequest,
@@ -23,6 +32,22 @@ def _runtime(request: Request) -> AppRuntime:
     if runtime is None:
         raise HTTPException(status_code=503, detail="Application runtime is not initialized")
     return runtime
+
+
+def _chat_http_exception(exc: Exception) -> HTTPException:
+    if isinstance(exc, ConfigurationError):
+        return HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, AmbiguousEntityError):
+        return HTTPException(status_code=409, detail=str(exc))
+    if isinstance(exc, EntityResolutionError):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, (PlannerError, SqlValidationError)):
+        return HTTPException(status_code=422, detail=str(exc))
+    if isinstance(exc, QueryExecutionError):
+        return HTTPException(status_code=500, detail=str(exc))
+    if isinstance(exc, ContextGraphError):
+        return HTTPException(status_code=500, detail=str(exc))
+    raise exc
 
 
 @router.get("/health")
@@ -99,7 +124,10 @@ def get_path(
 def chat_query(request: Request, payload: ChatQueryRequest) -> ChatQueryResponse:
     runtime = _runtime(request)
     assert runtime.query_service is not None
-    return runtime.query_service.handle_chat_request(payload)
+    try:
+        return runtime.query_service.handle_chat_request(payload)
+    except Exception as exc:
+        raise _chat_http_exception(exc) from exc
 
 
 @router.post("/chat/query/stream")

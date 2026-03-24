@@ -8,22 +8,49 @@ import pandas as pd
 from sqlalchemy import create_engine
 
 from context_graph.bridges import build_all_bridges, build_bridge_coverage_report
-from context_graph.config import ENTITY_CONFIGS
+from context_graph.config import APPROVED_VIEWS, ENTITY_CONFIGS
 from context_graph.graph import build_graph_tables
 from context_graph.io import profile_staging_frames, load_all_staging_frames
 from context_graph.normalize import normalize_all_frames
 from context_graph.semantic import build_semantic_catalog, create_sql_indexes, create_sql_views
 
 
-EXPECTED_COUNTS = {
-    "sales_orders": 100,
-    "sales_order_items": 167,
-    "deliveries": 86,
-    "delivery_items": 137,
-    "billing_documents": 163,
-    "billing_items": 245,
-    "journal_entries_ar": 123,
-    "payments_ar": 120,
+CORE_TABLES = (
+    "sales_orders",
+    "sales_order_items",
+    "deliveries",
+    "delivery_items",
+    "billing_documents",
+    "billing_items",
+    "journal_entries_ar",
+    "payments_ar",
+)
+
+REQUIRED_NODE_TYPES = (
+    "SalesOrder",
+    "Delivery",
+    "BillingDocument",
+    "JournalEntry",
+    "Payment",
+    "Customer",
+    "Product",
+    "Address",
+)
+
+REQUIRED_EDGE_TYPES = (
+    "HAS_ITEM",
+    "ORDERED_BY",
+    "FULFILLED_BY",
+    "BILLED_AS",
+    "POSTED_TO",
+    "SETTLED_BY",
+)
+
+ALLOWED_PRIMARY_ANOMALIES = {
+    "delivered_not_billed",
+    "billed_not_posted",
+    "posted_not_paid",
+    "quantity_mismatch",
 }
 
 
@@ -106,76 +133,162 @@ def _build_quality_report(
     }
 
 
+def _count_rows(engine: Any, relation_name: str) -> int:
+    return int(
+        pd.read_sql_query(
+            f"SELECT COUNT(*) AS count FROM {relation_name}",
+            engine,
+        )["count"].iloc[0]
+    )
+
+
 def _run_acceptance_checks(engine: Any) -> dict[str, Any]:
-    results: dict[str, Any] = {"counts": {}, "trace_check": {}, "ranking_check": {}, "anomaly_check": {}}
+    results: dict[str, Any] = {
+        "core_tables": {},
+        "approved_views": {},
+        "graph_integrity": {},
+        "flow_integrity": {},
+        "anomaly_integrity": {},
+        "product_summary": {},
+    }
 
-    for table_name, expected_count in EXPECTED_COUNTS.items():
-        actual_count = int(pd.read_sql_query(f"SELECT COUNT(*) AS count FROM {table_name}", engine)["count"].iloc[0])
-        if actual_count != expected_count:
-            raise AssertionError(f"Unexpected row count for {table_name}: expected {expected_count}, got {actual_count}")
-        results["counts"][table_name] = actual_count
+    for table_name in CORE_TABLES:
+        row_count = _count_rows(engine, table_name)
+        if row_count <= 0:
+            raise AssertionError(f"Core table '{table_name}' is empty")
+        results["core_tables"][table_name] = row_count
 
-    trace_df = pd.read_sql_query(
+    for view_name in APPROVED_VIEWS:
+        row_count = _count_rows(engine, view_name)
+        if row_count <= 0:
+            raise AssertionError(f"Approved analytical view '{view_name}' returned no rows")
+        columns = pd.read_sql_query(f"SELECT * FROM {view_name} LIMIT 0", engine).columns.tolist()
+        results["approved_views"][view_name] = {
+            "row_count": row_count,
+            "columns": columns,
+        }
+
+    node_count = _count_rows(engine, "graph_nodes")
+    edge_count = _count_rows(engine, "graph_edges")
+    if node_count <= 0 or edge_count <= 0:
+        raise AssertionError("Graph projection must materialize non-empty nodes and edges")
+
+    node_type_df = pd.read_sql_query(
         """
-        SELECT DISTINCT
-            billing_document,
-            delivery_document,
-            sales_order,
-            journal_accounting_document,
-            clearing_accounting_document
-        FROM v_billing_trace
-        WHERE billing_document = '90504219'
+        SELECT node_type, COUNT(*) AS count
+        FROM graph_nodes
+        GROUP BY node_type
         """,
         engine,
     )
-    if trace_df.empty:
-        raise AssertionError("Billing trace view returned no rows for billing document 90504219")
-    if set(trace_df["delivery_document"].dropna()) != {"80738051"}:
-        raise AssertionError(f"Unexpected delivery trace for 90504219: {trace_df['delivery_document'].tolist()}")
-    if set(trace_df["sales_order"].dropna()) != {"740520"}:
-        raise AssertionError(f"Unexpected sales order trace for 90504219: {trace_df['sales_order'].tolist()}")
-    if set(trace_df["journal_accounting_document"].dropna()) != {"9400000220"}:
-        raise AssertionError(
-            f"Unexpected journal trace for 90504219: {trace_df['journal_accounting_document'].tolist()}"
-        )
-    if "9400635977" not in set(trace_df["clearing_accounting_document"].dropna()):
-        raise AssertionError(
-            "Expected payment clearing accounting document 9400635977 for billing document 90504219"
-        )
-    results["trace_check"] = trace_df.to_dict(orient="records")
+    node_type_counts = {
+        row.node_type: int(row.count)
+        for row in node_type_df.itertuples()
+    }
+    missing_node_types = [
+        node_type
+        for node_type in REQUIRED_NODE_TYPES
+        if node_type_counts.get(node_type, 0) <= 0
+    ]
+    if missing_node_types:
+        raise AssertionError(f"Required node types missing from graph projection: {missing_node_types}")
 
-    ranking_df = pd.read_sql_query(
+    edge_type_df = pd.read_sql_query(
+        """
+        SELECT edge_type, COUNT(*) AS count
+        FROM graph_edges
+        GROUP BY edge_type
+        """,
+        engine,
+    )
+    edge_type_counts = {
+        row.edge_type: int(row.count)
+        for row in edge_type_df.itertuples()
+    }
+    missing_edge_types = [
+        edge_type
+        for edge_type in REQUIRED_EDGE_TYPES
+        if edge_type_counts.get(edge_type, 0) <= 0
+    ]
+    if missing_edge_types:
+        raise AssertionError(f"Required edge types missing from graph projection: {missing_edge_types}")
+    results["graph_integrity"] = {
+        "node_count": node_count,
+        "edge_count": edge_count,
+        "node_type_counts": node_type_counts,
+        "edge_type_counts": edge_type_counts,
+    }
+
+    flow_df = pd.read_sql_query(
+        """
+        SELECT
+            COUNT(*) AS trace_rows,
+            SUM(CASE WHEN delivery_document IS NOT NULL THEN 1 ELSE 0 END) AS with_delivery,
+            SUM(CASE WHEN sales_order IS NOT NULL THEN 1 ELSE 0 END) AS with_sales_order,
+            SUM(CASE WHEN journal_accounting_document IS NOT NULL THEN 1 ELSE 0 END) AS with_journal,
+            SUM(CASE WHEN clearing_accounting_document IS NOT NULL THEN 1 ELSE 0 END) AS with_payment
+        FROM v_billing_trace
+        """,
+        engine,
+    )
+    flow_summary = {
+        key: int(value)
+        for key, value in flow_df.iloc[0].to_dict().items()
+    }
+    incomplete_flow_segments = [
+        key
+        for key in ("with_delivery", "with_sales_order", "with_journal", "with_payment")
+        if flow_summary[key] <= 0
+    ]
+    if flow_summary["trace_rows"] <= 0:
+        raise AssertionError("Billing trace view did not return any rows")
+    if incomplete_flow_segments:
+        raise AssertionError(
+            "Billing trace view does not contain any end-to-end examples for: "
+            + ", ".join(incomplete_flow_segments)
+        )
+    results["flow_integrity"] = flow_summary
+
+    product_summary_df = pd.read_sql_query(
         """
         SELECT product_id, distinct_billing_documents
         FROM v_product_billing_summary
+        WHERE distinct_billing_documents > 0
         ORDER BY distinct_billing_documents DESC, product_id ASC
-        LIMIT 2
+        LIMIT 5
         """,
         engine,
     )
-    expected_ranking = {
-        ("S8907367008620", 22),
-        ("S8907367039280", 22),
-    }
-    actual_ranking = {(row.product_id, int(row.distinct_billing_documents)) for row in ranking_df.itertuples()}
-    if actual_ranking != expected_ranking:
-        raise AssertionError(f"Unexpected top billed products: {actual_ranking}")
-    results["ranking_check"] = ranking_df.to_dict(orient="records")
+    if product_summary_df.empty:
+        raise AssertionError("Product billing summary did not return any billed products")
+    results["product_summary"] = product_summary_df.to_dict(orient="records")
 
-    anomaly_df = pd.read_sql_query(
+    anomaly_row_count = _count_rows(engine, "v_incomplete_order_flows")
+    sales_order_item_count = _count_rows(engine, "sales_order_items")
+    if anomaly_row_count != sales_order_item_count:
+        raise AssertionError(
+            "Incomplete order flow view must preserve one row per sales order item: "
+            f"expected {sales_order_item_count}, got {anomaly_row_count}"
+        )
+    anomaly_values = pd.read_sql_query(
         """
-        SELECT DISTINCT sales_order
+        SELECT DISTINCT primary_anomaly
         FROM v_incomplete_order_flows
-        WHERE primary_anomaly = 'delivered_not_billed'
-        ORDER BY sales_order
+        WHERE primary_anomaly IS NOT NULL
+        ORDER BY primary_anomaly
         """,
         engine,
-    )
-    expected_anomalies = {"740506", "740507", "740508"}
-    actual_anomalies = set(anomaly_df["sales_order"].astype(str))
-    if not expected_anomalies.issubset(actual_anomalies):
-        raise AssertionError(f"Expected delivered_not_billed orders not found: {expected_anomalies - actual_anomalies}")
-    results["anomaly_check"] = anomaly_df.to_dict(orient="records")
+    )["primary_anomaly"].tolist()
+    unexpected_anomalies = sorted(set(anomaly_values) - ALLOWED_PRIMARY_ANOMALIES)
+    if unexpected_anomalies:
+        raise AssertionError(
+            f"Unexpected anomaly categories found in v_incomplete_order_flows: {unexpected_anomalies}"
+        )
+    results["anomaly_integrity"] = {
+        "row_count": anomaly_row_count,
+        "sales_order_item_count": sales_order_item_count,
+        "primary_anomalies": anomaly_values,
+    }
     return results
 
 

@@ -8,6 +8,7 @@ from typing import Any
 from context_graph.conversation_store import ConversationContext, ConversationStore
 from context_graph.entity_service import EntityService
 from context_graph.evidence_service import EvidenceBundle, EvidenceService
+from context_graph.exceptions import EntityResolutionError, QueryExecutionError
 from context_graph.graph_service import GraphService
 from context_graph.observability import QueryLogger
 from context_graph.plan_validator import QueryPlanValidator
@@ -105,26 +106,9 @@ class QueryService:
             )
             return response
         except Exception as exc:
-            error_response = ChatQueryResponse(
-                conversation_id=conversation_id,
-                answer=None,
-                intent=event.get("intent"),
-                route=event.get("route"),
-                query_plan=event.get("query_plan"),
-                sql=event.get("executed_sql") or event.get("generated_sql"),
-                row_count=0,
-                rows=[],
-                highlighted_node_ids=[],
-                highlighted_edge_ids=[],
-                cited_nodes=[],
-                cited_edges=[],
-                provenance_note=None,
-                error=str(exc),
-            )
             event["error"] = str(exc)
-            event["result"] = error_response.model_dump()
             self._query_logger.write(event)
-            return error_response
+            raise
 
     def stream_chat_request(self, request: ChatQueryRequest) -> Iterator[dict[str, Any]]:
         event: dict[str, Any] = {
@@ -193,26 +177,9 @@ class QueryService:
             )
             yield {"type": "final", "data": response.model_dump()}
         except Exception as exc:
-            error_response = ChatQueryResponse(
-                conversation_id=conversation_id,
-                answer=None,
-                intent=event.get("intent"),
-                route=event.get("route"),
-                query_plan=event.get("query_plan"),
-                sql=event.get("executed_sql") or event.get("generated_sql"),
-                row_count=0,
-                rows=[],
-                highlighted_node_ids=[],
-                highlighted_edge_ids=[],
-                cited_nodes=[],
-                cited_edges=[],
-                provenance_note=None,
-                error=str(exc),
-            )
             event["error"] = str(exc)
-            event["result"] = error_response.model_dump()
             self._query_logger.write(event)
-            yield {"type": "final", "data": error_response.model_dump()}
+            yield {"type": "error", "error": str(exc)}
 
     def _initialize_request(
         self,
@@ -289,7 +256,7 @@ class QueryService:
     ) -> ExecutionArtifacts:
         candidate_node_ids = self._graph_candidate_nodes(query_plan, selected_node_ids)
         if not candidate_node_ids:
-            raise ValueError("Graph route did not resolve any graph nodes")
+            raise EntityResolutionError("Graph route did not resolve any graph nodes")
         if query_plan.intent == "document_trace":
             graph_response = self._graph_service.get_path(
                 node_id=candidate_node_ids[0],
@@ -305,7 +272,9 @@ class QueryService:
                 cluster_mode=request.clusterMode,
             )
             if graph_response is None:
-                raise ValueError("Could not derive a combined graph response for the selected entities")
+                raise QueryExecutionError(
+                    "Could not derive a combined graph response for the selected entities"
+                )
         else:
             graph_response = self._graph_service.get_subgraph(
                 node_id=candidate_node_ids[0],

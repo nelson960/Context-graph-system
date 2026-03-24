@@ -7,6 +7,7 @@ from context_graph.catalog_service import CatalogService
 from context_graph.conversation_store import ConversationStore
 from context_graph.entity_service import EntityService
 from context_graph.evidence_service import EvidenceService
+from context_graph.exceptions import PlannerError
 from context_graph.graph_service import GraphService
 from context_graph.observability import QueryLogger
 from context_graph.plan_validator import QueryPlanValidator
@@ -86,6 +87,11 @@ class MemoryPlannerStub(GraphPlannerStub):
 class NoPlanLookupStub(GraphPlannerStub):
     def plan(self, message, selected_nodes, memory_context=None):  # pragma: no cover - should not run
         raise AssertionError("plan should not be called for direct entity lookup prompts")
+
+
+class FailingPlannerStub(GraphPlannerStub):
+    def plan(self, message, selected_nodes, memory_context=None):
+        raise PlannerError("Planner exploded")
 
 
 def build_query_service(tmp_path: Path, planner=None) -> QueryService:
@@ -202,3 +208,22 @@ def test_query_service_reuses_conversation_entities_when_follow_up_is_implicit(t
         entity.resolved_node_id == "plant:AS05"
         for entity in second_response.memory_state.resolved_entities
     )
+
+
+def test_query_service_raises_instead_of_returning_error_payload(tmp_path) -> None:
+    query_service = build_query_service(tmp_path, planner=FailingPlannerStub())
+    try:
+        query_service.handle_chat_request(ChatQueryRequest(message="trace a billing document"))
+    except PlannerError as exc:
+        assert str(exc) == "Planner exploded"
+    else:  # pragma: no cover
+        raise AssertionError("Expected planner failure to raise instead of returning an error payload")
+
+
+def test_query_service_stream_chat_request_emits_explicit_error_event(tmp_path) -> None:
+    query_service = build_query_service(tmp_path, planner=FailingPlannerStub())
+    events = list(query_service.stream_chat_request(ChatQueryRequest(message="trace a billing document")))
+
+    assert events[0]["type"] == "conversation"
+    assert events[1]["type"] == "status"
+    assert events[-1] == {"type": "error", "error": "Planner exploded"}

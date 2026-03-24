@@ -27,7 +27,7 @@ PLANNER_EXAMPLES = textwrap.dedent(
     expected preferred view: v_product_billing_summary
 
     Example 2
-    user question: Trace billing document 90504219 through delivery, sales order, journal entry, and payment.
+    user question: Trace billing document <billing document id> through delivery, sales order, journal entry, and payment.
     expected intent: document_trace
     expected route: graph
     expected preferred view: v_billing_trace
@@ -39,10 +39,10 @@ PLANNER_EXAMPLES = textwrap.dedent(
     expected preferred view: v_incomplete_order_flows
 
     Example 4
-    user question: Explain AS05.
+    user question: Explain plant <plant id>.
     expected intent: entity_lookup
     expected route: graph
-    expected preferred entity: Plant AS05
+    expected preferred entity: Plant
 
     Example 5
     user question: Write me a poem about supply chains.

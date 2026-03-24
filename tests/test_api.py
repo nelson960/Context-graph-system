@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from context_graph.catalog_service import CatalogService
+from context_graph.exceptions import ConfigurationError
 from context_graph.main import create_app
 from context_graph.schemas import ChatQueryResponse
 from context_graph.sql_guard import SqlValidator
@@ -91,6 +92,23 @@ def test_chat_stream_endpoint_returns_ndjson_events() -> None:
     assert events[2] == {"type": "answer_delta", "delta": "Plant AS05"}
     assert events[-1]["type"] == "final"
     assert events[-1]["data"]["graph_center_node_id"] == "plant:AS05"
+
+
+def test_chat_query_endpoint_returns_http_error_on_service_failure() -> None:
+    app = create_app()
+
+    class QueryServiceStub:
+        def handle_chat_request(self, payload):
+            raise ConfigurationError("MODEL_API_KEY or OPENAI_API_KEY is required")
+
+    app.state.runtime.query_service = QueryServiceStub()
+    client = TestClient(app)
+    response = client.post(
+        "/api/chat/query",
+        json={"message": "which products have the most billing documents?", "selectedNodeIds": []},
+    )
+    assert response.status_code == 503
+    assert response.json()["detail"] == "MODEL_API_KEY or OPENAI_API_KEY is required"
 
 
 def test_sql_validator_rejects_non_approved_tables() -> None:
